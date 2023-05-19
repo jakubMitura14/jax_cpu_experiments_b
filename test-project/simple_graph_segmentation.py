@@ -12,7 +12,7 @@ import jax.numpy as jnp
 from simple_seg_utils import *
 
 
-f = h5py.File('/workspaces/jax_cpu_experiments/hdf5_loc/example_mask.hdf5', 'r+')
+f = h5py.File('/workspaces/jax_cpu_experiments_b/hdf5_loc/example_mask.hdf5', 'r+')
 label=f["label"][:,:]
 curr_image=f["image"][:,:]
 masks=f["masks"][:,:,:]
