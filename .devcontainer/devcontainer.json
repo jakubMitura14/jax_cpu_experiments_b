@@ -28,6 +28,10 @@
 			"extensions": [
 				"ms-python.python"
 			]
+			,	"mounts": [
+				"source=/home/jakubmitura/explore,target=/workspaces/jax_cpu_experiments_b/explore,type=bind,consistency=cached",
+		
+			  ],
 		}
 	},
 
