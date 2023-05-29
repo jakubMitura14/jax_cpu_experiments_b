@@ -15,6 +15,18 @@ import einops
 remat = nn_partitioning.remat
 
 
+class Conv_trio(nn.Module):
+    cfg: ml_collections.config_dict.config_dict.ConfigDict
+    channels: int
+    strides:Tuple[int]=(1,1)
+
+    @nn.compact
+    def __call__(self, x: jnp.ndarray) -> jnp.ndarray:
+        x=nn.Conv(self.channels, kernel_size=(5,5),strides=self.strides)(x)
+        x=nn.LayerNorm()(x)
+        return jax.nn.gelu(x)
+
+
 
 def get_diameter_no_pad(r):
     """
