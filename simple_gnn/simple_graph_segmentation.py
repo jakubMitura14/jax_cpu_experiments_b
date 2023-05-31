@@ -96,7 +96,7 @@ def iter_over_all_masks(masks,curr_image,shape_reshape_cfgs,shape_reshape_cfgs_o
 
 class Simple_graph_net(nn.Module):
     cfg: ml_collections.config_dict.config_dict.ConfigDict
-
+    edge_pairs: jnp.ndarray
     def setup(self):
         cfg=self.cfg
         initial_masks= jnp.stack([
@@ -110,9 +110,9 @@ class Simple_graph_net(nn.Module):
         self.initial_masks=initial_masks
         self.shape_reshape_cfgs=get_all_shape_reshape_constants(cfg,r_x=3,r_y=3)
         self.shape_reshape_cfgs_old=get_all_shape_reshape_constants(cfg,r_x=3,r_y=2)
-        edge_pairs=get_sorce_targets(cfg.orig_grid_shape)
-        self.senders=edge_pairs[:,0]
-        self.receivers=edge_pairs[:,1]
+        
+        self.senders=self.edge_pairs[:,0]
+        self.receivers=self.edge_pairs[:,1]
         self.n_node = initial_masks.shape[1]*initial_masks.shape[2]
         self.n_edge = self.senders.shape[0]
         self.gnn=GraphNetwork(mlp_features=[5,5,5], latent_size=10)

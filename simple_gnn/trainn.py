@@ -110,8 +110,8 @@ def initt(rng_2,cfg:ml_collections.config_dict.FrozenConfigDict,model):
 
 # @partial(jax.pmap, axis_name="batch",static_broadcasted_argnums=(2,3,4))
 # @partial(jax.pmap, axis_name="batch",static_broadcasted_argnums=(2,3,4))
-
-def update_fn(state, image, label,masks,cfg,model):
+@partial(jax.jit,static_argnames=("model"))
+def update_fn(state, image, label,masks,model):
   """Train for a single step."""
   def loss_fn(params,image,label,masks):
     losses=model.apply({'params': params}, image,label,masks)#, rngs={'texture': random.PRNGKey(2)}
@@ -144,7 +144,7 @@ def train_epoch(batch_images,batch_labels,masks,epoch,index
   # opt_repl = flax.jax_utils.replicate(opt_cpu)
   rngs_loop = flax.jax_utils.replicate(rng_loop)
   # print(f"state {state[1]}")
-  state,loss=update_fn(state, batch_images, batch_labels,masks,cfg,model)
+  state,loss=update_fn(state, batch_images, batch_labels,masks,model)
   epoch_loss.append(jnp.mean(loss).flatten())
 
   # if(index==0 and epoch%cfg.divisor_logging==0):
@@ -167,7 +167,8 @@ def main_train(cfg):
   slicee=57#57 was nice
 
   prng = jax.random.PRNGKey(42)
-  model= Simple_graph_net(cfg)
+  edge_pairs=get_sorce_targets(cfg.orig_grid_shape)
+  model= Simple_graph_net(cfg,edge_pairs)
   rng_2=jax.random.split(prng,num=jax.local_device_count() )
 
 
