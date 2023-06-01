@@ -61,6 +61,7 @@ cfg=get_cfg()
 edge_pairs=get_sorce_targets(cfg.orig_grid_shape)
 model= Simple_graph_net(cfg,edge_pairs)
 
+
 def setup_tensorboard():
     jax.numpy.set_printoptions(linewidth=400)
     ##### tensor board
@@ -89,7 +90,6 @@ def initt(rng_2,cfg:ml_collections.config_dict.FrozenConfigDict,model):
   lab_size=list(cfg.label_size)
   # img_size[0]=img_size[0]//jax.local_device_count()
   # lab_size[0]=lab_size[0]//jax.local_device_count()
-  print(f"in initttt {tuple(img_size)}")
   input=jnp.ones(tuple(img_size))
   input_label=jnp.ones(tuple(lab_size))
   input_masks=jnp.ones(masks_size)
@@ -118,7 +118,7 @@ def initt(rng_2,cfg:ml_collections.config_dict.FrozenConfigDict,model):
 def update_fn(state, image, label,masks):
   """Train for a single step."""
   def loss_fn(params,image,label,masks):
-    losses=model.apply({'params': params}, image,label,masks)#, rngs={'texture': random.PRNGKey(2)}
+    losses,preds,orig_label_sv=model.apply({'params': params}, image,label,masks)#, rngs={'texture': random.PRNGKey(2)}
     return jnp.mean(losses) 
 
   grad_fn = jax.value_and_grad(loss_fn)
@@ -131,10 +131,43 @@ def update_fn(state, image, label,masks):
 
 # @partial(jax.pmap, axis_name="batch",static_broadcasted_argnums=(2,3,4,5))
 def simple_apply(state, image, labels,masks,cfg,step,model):
-  losses=model.apply({'params': state.params}, image,labels,masks, rngs={'to_shuffle': random.PRNGKey(2)})#, rngs={'texture': random.PRNGKey(2)}
+  losses,preds,orig_label_sv=model.apply({'params': state.params}, image,labels,masks, rngs={'to_shuffle': random.PRNGKey(2)})#, rngs={'texture': random.PRNGKey(2)}
 
 
-  return losses
+  return losses,preds,orig_label_sv
+
+def get_visualizations(masks,batch_images,label_preds,epoch,tt):
+  # print(f"aaa label_preds {jnp.sum(label_preds.flatten())} shape {label_preds.shape}")
+  # label_preds=nn.softmax(label_preds,axis=-1)
+  # label_preds= jnp.round(label_preds)
+  # print(f"bbb label_preds {jnp.sum(label_preds.flatten())} label_preds {label_preds.shape} ")
+  label_preds=label_preds[:,1]
+  print(f"ccc label_preds {jnp.sum(label_preds.flatten())}")
+
+  initial_masks= jnp.stack([
+      get_initial_supervoxel_masks(cfg.orig_grid_shape,0,0),
+      get_initial_supervoxel_masks(cfg.orig_grid_shape,1,0),
+      get_initial_supervoxel_masks(cfg.orig_grid_shape,0,1),
+      get_initial_supervoxel_masks(cfg.orig_grid_shape,1,1)
+          ],axis=0)
+  initial_masks=jnp.sum(initial_masks,axis=0)   
+  initial_masks=einops.rearrange(initial_masks,'x y p ->1 x y p')
+  initial_masks=initial_masks
+  shape_reshape_cfgs=get_all_shape_reshape_constants(cfg,r_x=3,r_y=3)
+  shape_reshape_cfgs_old=get_all_shape_reshape_constants(cfg,r_x=3,r_y=2)
+
+  tokens_a,tokens_b,tokens_c,tokens_d,tokens_a_shape, tokens_b_shape,tokens_c_shape,tokens_d_shape=iter_over_all_masks_for_shape(masks,batch_images,shape_reshape_cfgs,shape_reshape_cfgs_old,initial_masks,False,cfg.epsilon,True)
+  # print(f"tokens_a_shape {tokens_a_shape} tokens_b_shape {tokens_b_shape} tokens_c_shape {tokens_c_shape} tokens_d_shape {tokens_d_shape}" )   
+  
+  recreated_dense_label=reshape_sv_labels_to_dense(tokens_a_shape, tokens_b_shape,tokens_c_shape,tokens_d_shape
+                               ,tokens_a,tokens_b,tokens_c,tokens_d
+                               ,label_preds,shape_reshape_cfgs
+                               )
+  with file_writer.as_default():
+    tf.summary.image(f"inferred_labels {tt}",plot_heatmap_to_image(recreated_dense_label[0,:,:,0]) , step=epoch,max_outputs=2000)
+    print(f"recreated_dense_label {jnp.sum(recreated_dense_label.flatten())} shape {recreated_dense_label.shape}")
+
+  # print(f"recreated_dense_label {recreated_dense_label.shape}")
 
 
 
@@ -159,8 +192,18 @@ def train_epoch(batch_images,batch_labels,masks,epoch,index
   #   with file_writer.as_default():
   #       tf.summary.scalar(f"mask_0 mean", np.mean(mask_0.flatten()), step=epoch)    
 
-  with file_writer.as_default():
-      tf.summary.scalar(f"train loss ", np.mean(epoch_loss),       step=epoch)
+  #we need to keep those below with batch =1
+
+  batch_images_for_vis=batch_images
+  batch_labels_for_vis=batch_labels
+  masks_for_vis=masks
+  if (epoch%8==0):
+    losses,preds,orig_label_sv=simple_apply(state, batch_images_for_vis, batch_labels_for_vis,masks_for_vis,cfg,step,model)
+    get_visualizations(masks,batch_images,preds,epoch,'inferred')
+    get_visualizations(masks,batch_images,orig_label_sv,epoch,'orig')
+
+    with file_writer.as_default():
+        tf.summary.scalar(f"train loss ", np.mean(epoch_loss),       step=epoch)
          
   return state,loss
 
@@ -183,10 +226,11 @@ def main_train():
   curr_image= einops.rearrange(curr_image,'w h -> 1 w h 1')
   masks= einops.rearrange(masks,'w h c -> 1 w h c')
 
-
-
   state= initt(prng,cfg,model)  
 
+  print(f"sum orig label {jnp.sum(label.flatten())} shape {label.shape}")
+  with file_writer.as_default():
+    tf.summary.image(f"orig label",plot_heatmap_to_image(jnp.round(label)[0,:,:,0]) , step=1)  
 
 
 
@@ -213,3 +257,7 @@ x = random.uniform(random.PRNGKey(0), (100, 100))
 jnp.dot(x, x).block_until_ready() 
 toc_loop = time.perf_counter()
 print(f"loop {toc_loop - tic_loop:0.4f} seconds")
+
+
+
+# tensorboard --logdir=/workspaces/jax_cpu_experiments_b/explore/tensorboard

@@ -12,12 +12,26 @@ import jax.scipy as jsp
 from flax.linen import partitioning as nn_partitioning
 import pandas as pd
 import einops
+
+import io
+import itertools
+from packaging import version
+
+import tensorflow as tf
+from tensorflow import keras
+
+import matplotlib.pyplot as plt
+import numpy as np
+import sklearn.metrics
+import seaborn as sns
+import einops
+
 remat = nn_partitioning.remat
 
 
 def get_cfg():
     cfg = config_dict.ConfigDict()
-    cfg.total_steps=30
+    cfg.total_steps=300
     # cfg.learning_rate=0.00002 #used for warmup with average coverage loss
     # cfg.learning_rate=0.0000001
     cfg.learning_rate=0.001
@@ -95,6 +109,31 @@ def get_cfg():
 
     return cfg
 
+def plot_to_image(figure):
+  """Converts the matplotlib plot specified by 'figure' to a PNG image and
+  returns it. The supplied figure is closed and inaccessible after this call."""
+  # Save the plot to a PNG in memory.
+  buf = io.BytesIO()
+  plt.savefig(buf, format='png')
+  # Closing the figure prevents it from being displayed directly inside
+  # the notebook.
+  plt.close(figure)
+  buf.seek(0)
+  # Convert PNG buffer to TF image
+  image = tf.image.decode_png(buf.getvalue(), channels=4)
+  # Add the batch dimension
+#   image = tf.expand_dims(image, 0)
+#   image = tf.expand_dims(image, 0)
+  image = einops.rearrange(image,'h w c-> 1 h w c' )  
+  return image
+
+def plot_heatmap_to_image(arr,cmap=None):
+    
+    # sns.set(rc={'figure.figsize':(16,16)})
+    fig = sns.heatmap(arr).get_figure()
+    if(cmap!=None):
+      fig = sns.heatmap(arr,cmap=cmap).get_figure()
+    return plot_to_image(fig)
 
 
 class Conv_trio(nn.Module):
