@@ -56,7 +56,10 @@ from GNN_model import *
 from simple_graph_segmentation import *
 import tensorflow as tf
 
-
+config.update("jax_debug_nans", True)
+cfg=get_cfg()
+edge_pairs=get_sorce_targets(cfg.orig_grid_shape)
+model= Simple_graph_net(cfg,edge_pairs)
 
 def setup_tensorboard():
     jax.numpy.set_printoptions(linewidth=400)
@@ -110,8 +113,9 @@ def initt(rng_2,cfg:ml_collections.config_dict.FrozenConfigDict,model):
 
 # @partial(jax.pmap, axis_name="batch",static_broadcasted_argnums=(2,3,4))
 # @partial(jax.pmap, axis_name="batch",static_broadcasted_argnums=(2,3,4))
-@partial(jax.jit,static_argnames=("model"))
-def update_fn(state, image, label,masks,model):
+# @partial(jax.jit,static_argnames=("model"))
+@jax.jit
+def update_fn(state, image, label,masks):
   """Train for a single step."""
   def loss_fn(params,image,label,masks):
     losses=model.apply({'params': params}, image,label,masks)#, rngs={'texture': random.PRNGKey(2)}
@@ -144,7 +148,7 @@ def train_epoch(batch_images,batch_labels,masks,epoch,index
   # opt_repl = flax.jax_utils.replicate(opt_cpu)
   rngs_loop = flax.jax_utils.replicate(rng_loop)
   # print(f"state {state[1]}")
-  state,loss=update_fn(state, batch_images, batch_labels,masks,model)
+  state,loss=update_fn(state, batch_images, batch_labels,masks)
   epoch_loss.append(jnp.mean(loss).flatten())
 
   # if(index==0 and epoch%cfg.divisor_logging==0):
@@ -163,12 +167,11 @@ def train_epoch(batch_images,batch_labels,masks,epoch,index
 
 
 
-def main_train(cfg):
+def main_train():
   slicee=57#57 was nice
 
   prng = jax.random.PRNGKey(42)
-  edge_pairs=get_sorce_targets(cfg.orig_grid_shape)
-  model= Simple_graph_net(cfg,edge_pairs)
+
   rng_2=jax.random.split(prng,num=jax.local_device_count() )
 
 
@@ -197,13 +200,14 @@ def main_train(cfg):
                                         ,rng_loop,
                                       #  ,params_repl, opt_repl
                                         state)
+      print(f"loss {loss}")
 
 
 
 
 tic_loop = time.perf_counter()
 
-main_train(get_cfg())
+main_train()
 
 x = random.uniform(random.PRNGKey(0), (100, 100))
 jnp.dot(x, x).block_until_ready() 
