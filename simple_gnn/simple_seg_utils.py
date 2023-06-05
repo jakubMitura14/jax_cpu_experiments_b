@@ -31,10 +31,10 @@ remat = nn_partitioning.remat
 
 def get_cfg():
     cfg = config_dict.ConfigDict()
-    cfg.total_steps=300
+    cfg.total_steps=3000
     # cfg.learning_rate=0.00002 #used for warmup with average coverage loss
     # cfg.learning_rate=0.0000001
-    cfg.learning_rate=0.001
+    cfg.learning_rate=0.00001
 
     cfg.num_dim=4
     cfg.batch_size=1

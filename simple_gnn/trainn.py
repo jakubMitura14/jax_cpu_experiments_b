@@ -261,3 +261,5 @@ print(f"loop {toc_loop - tic_loop:0.4f} seconds")
 
 
 # tensorboard --logdir=/workspaces/jax_cpu_experiments_b/explore/tensorboard
+
+# python3 -m zenodo_get --retry=8 10.5281/zenodo.6517397

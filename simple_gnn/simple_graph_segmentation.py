@@ -167,7 +167,7 @@ class Simple_graph_net(nn.Module):
         self.receivers=self.edge_pairs[:,1]
         self.n_node = initial_masks.shape[1]*initial_masks.shape[2]
         self.n_edge = self.senders.shape[0]
-        self.gnn=GraphNetwork(mlp_features=[5,5,5], latent_size=10)
+        self.gnn=GraphNetwork(mlp_features=[30,30,30], latent_size=30)
 
     
     @nn.compact
@@ -177,9 +177,11 @@ class Simple_graph_net(nn.Module):
         # print(f"ttttttttttt tokens {tokens.shape}")
         tokens=Conv_trio(self.cfg,40)(tokens)
         tokens=Conv_trio(self.cfg,40)(tokens)
+        tokens=Conv_trio(self.cfg,40)(tokens)
         tokens= einops.rearrange(tokens,'f x y c-> f (x y c)')
-        tokens= nn.Dense(features=6)(tokens)
+        tokens= nn.Dense(features=30)(tokens)
         tokens= nn.relu(tokens)
+
         # Optionally you can add `global` information, such as a graph label.
         global_context = jnp.array([[1]]) # Same feature dims as nodes and edges.
         graph = jraph.GraphsTuple(
