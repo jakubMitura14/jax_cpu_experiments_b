@@ -44,7 +44,8 @@ RUN pip3 --disable-pip-version-check --no-cache-dir  install  opencv-python
 RUN pip3 --disable-pip-version-check --no-cache-dir  install  ott-jax
 RUN pip3 --disable-pip-version-check --no-cache-dir  install  jax_smi orbax
 RUN pip3 --disable-pip-version-check --no-cache-dir  install  tensorflow
-RUN pip3 --disable-pip-version-check --no-cache-dir  install  zenodo_get==1.3.4 
+RUN pip3 --disable-pip-version-check --no-cache-dir  install  zenodo_get==1.3.4 xnat
+RUN pip3 --disable-pip-version-check --no-cache-dir  install  pydicom
 
 # RUN set -ex \
 #     && apt-get -qq update \

@@ -1,0 +1,12 @@
+In docs was stated that we can add weights to points - we can use it for masking purposes
+1) get sinkhorn barycenters weighted by image mask as the sv description
+2) get ot transport cost between those barycenters - as they are sth like image histograms
+
+!!! understend better barycenters maybe they can be used directly for clustering 
+
+
+Below example how to get cost from 2 point clouds
+https://ott-jax.readthedocs.io/en/latest/tutorials/notebooks/basic_ot_between_datasets.html
+
+https://github.com/ott-jax/ott/discussions/357#discussioncomment-5769112
+https://arxiv.org/abs/2209.06975 On Thu, 29 Jun 2023 at 17:36, Jakub Mitura <jakub.mitura14@gmail.com> wrote: https://github.com/ott-jax/ott/discussions/357#dis
