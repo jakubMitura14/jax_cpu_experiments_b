@@ -4,3 +4,15 @@ Now is a given point or corner of a pixel in sv we can run algorithm checking is
 We can also establish is any of the lines (or planes in 3d) is intersecting given sv borders if so we can add there some partial - soft ownership between neighbouring svs 
 It would be nice if we could just get the raised to some power deviation of the sum of subtriangles area to triangle area (the same for tetrahedron) as a measurement of how much the point is inside , we can in theory at least make it more stable adding some small perturbations  ; in order to check multiple triangles we would just multiply deviations a single 0 deviation would lead to 0 total deviation
 We do not need springs we can just get the dot product of a vector with given direction in x y axis and multiply by its strength value
+
+
+maybe simpler would be to score by value of the moved points in edge map
+    value would be interpolated from an edge map - and the goal would be to 
+    maximize the sum of edge values- we can use for it jax scipy map coordinates
+
+there is a way to make more control points and keep it ok shape - after setting the current control points - we can treat them as static 
+    then add between those points that are now static get in halth way new control points that can move closer and more distant to neighbouring edges
+    as well as in orthogonal direction half distance between neighbouring control points in either direction
+
+
+All weights should be encoded in channels of a sv (so wwights would have the shape of original grid plus necessery numer of channels)
