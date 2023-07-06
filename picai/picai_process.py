@@ -12,19 +12,21 @@ import shutil
 import glob
 import pydicom
 from pydicom import dcmread
-import pydicom
+import pydicom as pyd
 from pydicom.pixel_data_handlers.util import convert_color_space
 import os
 import subprocess
 import tempfile
 import uuid
 from pydicom.uid import generate_uid
+from pydicom.uid import UID
+from medpy.io import load
 
 #main part adapted from https://simpleitk.readthedocs.io/en/next/Examples/DicomSeriesFromArray/Documentation.html
 #location in dicom calculations https://dicom.nema.org/medical/dicom/current/output/chtml/part03/sect_C.7.6.2.html#sect_C.7.6.2.1.1
 
 targetDir= '/workspaces/jax_cpu_experiments_b/explore/picai_unpacked'
-
+sample_dicom_fp="/workspaces/jax_cpu_experiments_b/explore/xnat/003/003/003_MR_1/scans/3-ep2d_diff_b_50_400_800_1200_TRACEW/resources/DICOM/files/1.3.12.2.1107.5.8.15.100960.30000022021714130657000000014-3-94-ju2ghp.dcm"
 dirDict={}
 for subdir, dirs, files in os.walk(targetDir):
     for subdirin, dirsin, filesin in os.walk(subdir):
@@ -84,15 +86,15 @@ def get_modality_tags(tag_name):
     return Series Number ;Window Center  ; Window Width 
     """
     if(tag_name=='t2w'):
-        return (0,424,808,365 ,"Tra","ORIGINAL, PRIMARY, M, NORM, DIS2D, SH, FIL	CS	36")
+        return (0,424,808,365 ,"Tra","ORIGINAL, PRIMARY, M, NORM, DIS2D, SH, FIL	CS	36","axial")
     if(tag_name=='sag'):
-        return (1,424,808,365,"Sag" ,"ORIGINAL, PRIMARY, M, NORM, DIS2D, FS, FIL	CS	36")
+        return (1,424,808,365,"Sag" ,"ORIGINAL, PRIMARY, M, NORM, DIS2D, FS, FIL	CS	36","sagittal")
     if(tag_name=='adc'):
-        return (3,814,1716,2205,"Tra" ,"DERIVED, PRIMARY, DIFFUSION, ADC, DIS2D	CS	36")
+        return (3,814,1716,2205,"Tra" ,"DERIVED, PRIMARY, DIFFUSION, ADC, DIS2D	CS	36","axial")
     if(tag_name=='hbv'):
-        return (4,31,81,2205 ,"Tra","DERIVED, PRIMARY, DIFFUSION, TRACEW, DIS2D	CS	38")
+        return (4,31,81,2205 ,"Tra","DERIVED, PRIMARY, DIFFUSION, TRACEW, DIS2D	CS	38","axial")
     if(tag_name=='cor'):
-        return (5,424,808,365,"Cor" ,"[0008,0008]	ImageType	[7] ORIGINAL, PRIMARY, M, NORM, DIS2D, FS, FIL	CS	36")
+        return (5,424,808,365,"Cor" ,"[0008,0008]	ImageType	[7] ORIGINAL, PRIMARY, M, NORM, DIS2D, FS, FIL	CS	36","coronal")
         
 
 # ['1', '0', '0', '0', '0', '-1'] you are dealing with Coronal plane view
@@ -127,14 +129,7 @@ def get_modality_tags(tag_name):
 
 
 
-def convert_mha_file(
-    filepath,
-    output_dir='./processed_images',
-    plane="axial",
-    sample_dicom_fp='./sample_dicom.dcm',
-    window_center=400,
-    window_width=1000
-):
+def convert_mha_file(image_path,patient_dir_path,patient_id,sample_dicom_fp,Frame_of_Reference_UID):
     """Takes path to an mha file converts and saves as series of dicom files.
     filepath: str path to an mha file.
     output_dir:str root directory where images should be stored.
@@ -143,8 +138,15 @@ def convert_mha_file(
     window_center: Dicom Parameter  used for windowing
     window_width: Dicom Parameter used for windowing
     """
+    output_dir=patient_dir_path
+    filepath=image_path
     input_ext = '.mha'
     voxel_arr,header = load(filepath)
+
+    modality_str=filepath.split('_')[-1].replace('.mha','')
+    Series_Number,Window_Center,Window_Width,Pixel_Bandwidth,Plane,Image_type,plane =get_modality_tags(modality_str)
+    window_center=Window_Center
+    window_width=Window_Width
 
     pixdim = header.get_voxel_spacing()
 
@@ -166,20 +168,19 @@ def convert_mha_file(
     series_uid = pyd.uid.generate_uid(prefix=None)
     # randomized patient ID
 
-    patient_id = str(uid.uuid.uuid4())
-    patient_name = patient_id
+    # patient_id = str(UID.uuid.uuid4())
+    # patient_name = patient_id
 
     scale_slope = "1"
     scale_intercept = "0"
     # create base directory
-    base_dir =  os.path.join( output_dir,
-    os.path.basename(filepath).replace(input_ext,"")
-    )
+    base_dir =  os.path.join( output_dir,modality_str)
     os.makedirs(base_dir,exist_ok=True)
     for slice_index in range(voxel_arr.shape[-1]):
         # generate SOPInstanceUID
         instance_uid = pyd.uid.generate_uid(prefix=None)
-
+        if(slice_index==0 and modality_str=='t2w'):
+            instance_uid=Frame_of_Reference_UID
         loc = slice_index * thickness
 
         ds = pyd.dcmread(sample_dicom_fp)
@@ -187,6 +188,7 @@ def convert_mha_file(
         # delete tags
         del ds[0x00200052]  # Frame of Reference UID
         del ds[0x00201040]  # Position Reference Indicator
+        del ds[0x00080008] 
 
         # slice and set PixelData tag
         axes = [slice(None)] * 3
@@ -202,12 +204,12 @@ def convert_mha_file(
         # - Rows/Columns determined by array shape
         # - we set slope/intercept to 1/0 since we're directly converting from PNG pixel values
         ds[0x00080018].value = instance_uid  # SOPInstanceUID
-        ds[0x00100010].value = patient_name
+        ds[0x00100010].value = patient_id
         ds[0x00100020].value = patient_id
         ds[0x0020000d].value = study_uid  # StudyInstanceUID
         ds[0x0020000e].value = series_uid  # SeriesInstanceUID
-        ds[0x0008103e].value = ""  # Series Description
-        ds[0x00200011].value = "1"  # Series Number
+        ds[0x0008103e].value = modality_str  # Series Description
+        ds[0x00200011].value = Series_Number  # Series Number
         ds[0x00200012].value = str(slice_index + 1)  # Acquisition Number
         ds[0x00200013].value = str(slice_index + 1)  # Instance Number
         ds[0x00201041].value = str(loc)  # Slice Location
@@ -216,8 +218,18 @@ def convert_mha_file(
         ds[0x00280030].value = spacing  # Pixel Spacing
         ds[0x00281050].value = str(window_center)  # Window Center
         ds[0x00281051].value = str(window_width)  # Window Width
-        ds[0x00281052].value = str(scale_intercept)  # Rescale Intercept
-        ds[0x00281053].value = str(scale_slope)  # Rescale Slope
+        
+        ds.add_new([0x0028, 0x1052], 'DS', scale_intercept)
+        # ds[0x00281052].value = str(scale_intercept)  # Rescale Intercept
+        
+        ds.add_new([0x0028, 0x1053], 'DS', scale_slope)
+        # ds[0x00281053].value = str(scale_slope)  # Rescale Slope
+        ds.add_new([0x0008, 0x0008], 'LO', str(Image_type))
+
+        ds.add_new([0x0020, 0x0052], 'LO', Frame_of_Reference_UID)
+
+        # elem.value = str(Frame_of_Reference_UID)  # Frame_of_Reference_UID
+
         ds.Modality = "MR"
 
         # Image Position (Patient)
@@ -232,14 +244,15 @@ def convert_mha_file(
             ds[0x00200032].value = [str(loc), "0", "0"]
             ds[0x00200037].value = ["0", "1", "0", "0", "0", "1"]
 
+
+
         # add new tags
         # see tag info e.g., from https://dicom.innolitics.com/ciods/nm-image/nm-reconstruction/00180050
         # Slice Thickness
         ds[0x00180050] = pyd.dataelem.DataElement(0x00180050, "DS", str(thickness))
         ds.SeriesDescription = f"MR {plane}"
 
-        dicom_fp =  os.path.join( output_dir,
-        os.path.basename(filepath).replace(input_ext,""),
+        dicom_fp =  os.path.join(base_dir,
         "{:03}.dcm".format(slice_index + 1),
         )
         dcm_base,_ = os.path.split(dicom_fp)
@@ -250,6 +263,8 @@ def convert_mha_file(
 
 def save_file_as_dicom(image_path,patient_dir_path,patient_id,t2w_orig,t2w_dir):
     modality_str=image_path.split('_')[-1].replace('.mha','')
+
+
     # print(f"image_path {image_path}   \n modality_str {modality_str}")
     new_img=sitk.ReadImage(image_path)
     study_dir_path=os.path.join(patient_dir_path,modality_str)
@@ -415,11 +430,13 @@ def save_patient_files_as_dicom(tupl,orig_targetDir, new_main_target_dir):
     t2w_img=sitk.ReadImage(t2w_file)
     t2w_orig= t2w_img.GetOrigin()
     t2w_dir= t2w_img.GetDirection()
-
+    Frame_of_Reference_UID= pyd.uid.generate_uid(prefix=None)
+    
     # print(f"GetMetaDataKeys  {t2w_img.GetMetaDataKeys()}")
     # offset_t2w=t2w_img.GetMetaData("Offset") 
 
-    list(map(lambda image_path:save_file_as_dicom(image_path,patient_dir_path,master_id,t2w_orig,t2w_dir), file_names ))
+    # list(map(lambda image_path:save_file_as_dicom(image_path,patient_dir_path,master_id,t2w_orig,t2w_dir), file_names ))
+    list(map(lambda image_path:convert_mha_file(image_path,patient_dir_path,master_id,sample_dicom_fp,Frame_of_Reference_UID), file_names ))
     
 
 
@@ -450,14 +467,14 @@ reader = sitk.ImageFileReader()
 # print("**********************************************************************************")
 
 
-reader.SetFileName("/workspaces/jax_cpu_experiments_b/explore/picai_dicom/10163/adc/2.dcm")
-reader.LoadPrivateTagsOn()
+# reader.SetFileName("/workspaces/jax_cpu_experiments_b/explore/picai_dicom/10163/adc/2.dcm")
+# reader.LoadPrivateTagsOn()
 
-reader.ReadImageInformation()
+# reader.ReadImageInformation()
 
-for k in reader.GetMetaDataKeys():
-    v = reader.GetMetaData(k)
-    print(f'({k}) = = "{v}"')
+# for k in reader.GetMetaDataKeys():
+#     v = reader.GetMetaData(k)
+#     print(f'({k}) = = "{v}"')
 
 # print("**********************************************************************************")
 
