@@ -12,6 +12,14 @@ import shutil
 import glob
 import pydicom
 from pydicom import dcmread
+import pydicom
+from pydicom.pixel_data_handlers.util import convert_color_space
+import os
+import subprocess
+import tempfile
+import uuid
+from pydicom.uid import generate_uid
+
 #main part adapted from https://simpleitk.readthedocs.io/en/next/Examples/DicomSeriesFromArray/Documentation.html
 #location in dicom calculations https://dicom.nema.org/medical/dicom/current/output/chtml/part03/sect_C.7.6.2.html#sect_C.7.6.2.1.1
 
@@ -117,6 +125,126 @@ def get_modality_tags(tag_name):
 
 #     return resample.Execute(itk_image) 
 
+
+
+def convert_mha_file(
+    filepath,
+    output_dir='./processed_images',
+    plane="axial",
+    sample_dicom_fp='./sample_dicom.dcm',
+    window_center=400,
+    window_width=1000
+):
+    """Takes path to an mha file converts and saves as series of dicom files.
+    filepath: str path to an mha file.
+    output_dir:str root directory where images should be stored.
+    plane: Acquisition plane  of the original image.
+    sample_dicom_fp: Path to dicom image to use as reference
+    window_center: Dicom Parameter  used for windowing
+    window_width: Dicom Parameter used for windowing
+    """
+    input_ext = '.mha'
+    voxel_arr,header = load(filepath)
+
+    pixdim = header.get_voxel_spacing()
+
+    # Image coordinates -> World coordinates
+    if plane == "axial":
+        slice_axis = 2
+        plane_axes = [0, 1]
+    elif plane == "coronal":
+        slice_axis = 1
+        plane_axes = [0, 2]
+    elif plane == "sagittal":
+        slice_axis = 0
+        plane_axes = [1, 2]
+    thickness = pixdim[slice_axis]
+    spacing = [pixdim[plane_axes[1]], pixdim[plane_axes[0]]]
+
+    # generate DICOM UIDs (StudyInstanceUID and SeriesInstanceUID)
+    study_uid = pyd.uid.generate_uid(prefix=None)
+    series_uid = pyd.uid.generate_uid(prefix=None)
+    # randomized patient ID
+
+    patient_id = str(uid.uuid.uuid4())
+    patient_name = patient_id
+
+    scale_slope = "1"
+    scale_intercept = "0"
+    # create base directory
+    base_dir =  os.path.join( output_dir,
+    os.path.basename(filepath).replace(input_ext,"")
+    )
+    os.makedirs(base_dir,exist_ok=True)
+    for slice_index in range(voxel_arr.shape[-1]):
+        # generate SOPInstanceUID
+        instance_uid = pyd.uid.generate_uid(prefix=None)
+
+        loc = slice_index * thickness
+
+        ds = pyd.dcmread(sample_dicom_fp)
+
+        # delete tags
+        del ds[0x00200052]  # Frame of Reference UID
+        del ds[0x00201040]  # Position Reference Indicator
+
+        # slice and set PixelData tag
+        axes = [slice(None)] * 3
+        axes[slice_axis] = slice_index
+        arr = voxel_arr[:,:,slice_index].T.astype(np.int16)
+        ds[0x7fe00010].value = arr.tobytes()
+
+        # modify tags
+        # using code from original nifti2dcm
+        # - UIDs are created by pydicom.uid.generate_uid at each level above
+        # - image position is calculated by combination of slice index and slice thickness
+        # - slice location is set to the value of image position along z-axis
+        # - Rows/Columns determined by array shape
+        # - we set slope/intercept to 1/0 since we're directly converting from PNG pixel values
+        ds[0x00080018].value = instance_uid  # SOPInstanceUID
+        ds[0x00100010].value = patient_name
+        ds[0x00100020].value = patient_id
+        ds[0x0020000d].value = study_uid  # StudyInstanceUID
+        ds[0x0020000e].value = series_uid  # SeriesInstanceUID
+        ds[0x0008103e].value = ""  # Series Description
+        ds[0x00200011].value = "1"  # Series Number
+        ds[0x00200012].value = str(slice_index + 1)  # Acquisition Number
+        ds[0x00200013].value = str(slice_index + 1)  # Instance Number
+        ds[0x00201041].value = str(loc)  # Slice Location
+        ds[0x00280010].value = arr.shape[0]  # Rows
+        ds[0x00280011].value = arr.shape[1]  # Columns
+        ds[0x00280030].value = spacing  # Pixel Spacing
+        ds[0x00281050].value = str(window_center)  # Window Center
+        ds[0x00281051].value = str(window_width)  # Window Width
+        ds[0x00281052].value = str(scale_intercept)  # Rescale Intercept
+        ds[0x00281053].value = str(scale_slope)  # Rescale Slope
+        ds.Modality = "MR"
+
+        # Image Position (Patient)
+        # Image Orientation (Patient)
+        if plane == "axial":
+            ds[0x00200032].value = ["0", "0", str(loc)]
+            ds[0x00200037].value = ["1", "0", "0", "0", "1", "0"]
+        elif plane == "coronal":
+            ds[0x00200032].value = ["0", str(loc), "0"]
+            ds[0x00200037].value = ["1", "0", "0", "0", "0", "1"]
+        elif plane == "sagittal":
+            ds[0x00200032].value = [str(loc), "0", "0"]
+            ds[0x00200037].value = ["0", "1", "0", "0", "0", "1"]
+
+        # add new tags
+        # see tag info e.g., from https://dicom.innolitics.com/ciods/nm-image/nm-reconstruction/00180050
+        # Slice Thickness
+        ds[0x00180050] = pyd.dataelem.DataElement(0x00180050, "DS", str(thickness))
+        ds.SeriesDescription = f"MR {plane}"
+
+        dicom_fp =  os.path.join( output_dir,
+        os.path.basename(filepath).replace(input_ext,""),
+        "{:03}.dcm".format(slice_index + 1),
+        )
+        dcm_base,_ = os.path.split(dicom_fp)
+        os.makedirs(dcm_base,exist_ok=True)
+        pyd.dcmwrite(dicom_fp,ds)
 
 
 
