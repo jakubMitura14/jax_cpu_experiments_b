@@ -6,6 +6,7 @@ import jax.numpy as jnp
 import jax
 from flax import linen as nn
 import einops
+import seaborn as sns
 
 
 def differentiable_abs(x):
@@ -240,3 +241,11 @@ grid_c_points=einops.repeat(grid_c_points, 'x y c->b x y c', b=pmapped_batch_siz
 
 ress=analyze_all_control_points(grid_a_points,grid_b_points_x,grid_b_points_y,grid_c_points,pmapped_batch_size,sv_diameter)
 print(ress.shape)
+
+mask0=ress[0,:,:,0]
+sns.heatmap(mask0)
+plt.savefig('/workspaces/jax_cpu_experiments_b/explore/example_mask0.png')
+plt.show()
+mask1=ress[0,:,:,1]
+sns.heatmap(mask0)
+plt.savefig('/workspaces/jax_cpu_experiments_b/explore/example_mask1.png')
