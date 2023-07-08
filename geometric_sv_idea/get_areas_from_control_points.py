@@ -40,7 +40,7 @@ def is_point_in_triangle(test_point,sv_center,control_point_a,control_point_b):
     subtriangles_area= sub_a+sub_b+sub_c
     area_diff=main_triangle_area-subtriangles_area
     area_diff=jnp.power(area_diff,2)
-    return (nn.sigmoid(area_diff*5000)-0.5)*2
+    return 1-(nn.sigmoid(area_diff*5000)-0.5)*2
 
 
 
@@ -55,20 +55,32 @@ def get_triangles_data():
     """
     return jnp.array([[0,8,1,0]#A
          ,[0,1,2,0]#B
-         ,[0,2,3,1]#C
-         ,[0,3,4,1]#D
+         ,[0,2,3,3]#C
+         ,[0,3,4,3]#D
          ,[0,4,5,2]#L
          ,[0,5,6,2]#K
-         ,[0,6,7,3]#J
-         ,[0,7,8,3]]#I
+         ,[0,6,7,1]#J
+         ,[0,7,8,1]]#I
         )
+
+    # return jnp.array([[0,8,1,0]#A
+    #      ,[0,1,2,0]#B
+    #      ,[0,2,3,1]#C
+    #      ,[0,3,4,1]#D
+    #      ,[0,4,5,2]#L
+    #      ,[0,5,6,2]#K
+    #      ,[0,6,7,3]#J
+    #      ,[0,7,8,3]]#I
+    #     )
+
 
 def analyze_single_triangle(curried,triangle_dat):
     """ 
     given a point it is designed to be scanned over triangles
     """
     x_y,control_points_coords,res=curried
-    is_in=is_point_in_triangle(x_y,control_points_coords[triangle_dat[0],:],control_points_coords[triangle_dat[1],:],control_points_coords[triangle_dat[3],:])
+    is_in=is_point_in_triangle(x_y,control_points_coords[triangle_dat[0],:],control_points_coords[triangle_dat[1],:],control_points_coords[triangle_dat[2],:])
+
     return (x_y,control_points_coords,res.at[triangle_dat[3]].set(res[triangle_dat[3]]+is_in )),None
 
 
@@ -83,7 +95,7 @@ def analyze_single_point(x_y,triangles_data,control_points_coords):
     """
     curried=x_y,control_points_coords,jnp.zeros(4)
     res,_= jax.lax.scan(analyze_single_triangle,curried, triangles_data)
-    return res[2]
+    return res[2]/jnp.sum(res[2])
 
 v_analyze_single_point=jax.vmap(analyze_single_point,in_axes=(0,None,None))
 v_v_analyze_single_point=jax.vmap(v_analyze_single_point,in_axes=(0,None,None))
@@ -100,8 +112,8 @@ def analyze_point_linear(curr_point, control_point,channel_up,channel_down):
     #will give close to 1 if test point is maller than control
     is_test_smaller_than_control=nn.sigmoid( (control_point-curr_point)*100 )
     res=jnp.zeros(4)
-    res=res.at[channel_up].set(1-is_test_smaller_than_control)
-    res=res.at[channel_down].set(is_test_smaller_than_control)
+    res=res.at[channel_up].set(is_test_smaller_than_control)
+    res=res.at[channel_down].set(1-is_test_smaller_than_control)
     return res
 
 v_analyze_point_linear= jax.vmap(analyze_point_linear,in_axes=(0,None,None,None))
@@ -117,18 +129,27 @@ def reshuffle_channels(res,sv_area_type):
         
     def beta():
         #0 1 2 3 -> 1 0 3 2
+        # return res[:,:, jnp.array([1,0,3,2])]
         return res[:,:, jnp.array([1,0,3,2])]
+        # return res
         
     def delta():
         #0 1 2 3 -> 3 2 1 0
-        return res[:,:, jnp.array([3,2,1,0])]
+        return res[:,:, jnp.array([1,0,3,2])]
+        # return res[:,:, jnp.array([1,2,3,0])]
+        # return res
 
     def gamma():
         #0 1 2 3 -> 2 3 0 1
-        return res[:,:, jnp.array([2,3,0,1])]
+        # return res[:,:, jnp.array([2,3,0,1])]
+        # return res[:,:, jnp.array([0,1,2,3])]
+        return res
+
 
     functions_list=[alfa,beta,delta,gamma]
     return jax.lax.switch(sv_area_type,functions_list)    
+
+
 
 
 def analyze_square(control_points_coords,diameter
@@ -142,20 +163,50 @@ def analyze_square(control_points_coords,diameter
         other sv types are set in a way to be consistent with first sv_area_type
     """
     #get grid of points and apply analyze_single_point ignoring left and bottom borders for now
-    grid=einops.rearrange(jnp.mgrid[0:diameter, 0:diameter],'c x y-> x y c')
+    grid=einops.rearrange(jnp.mgrid[0:diameter+1, 0:diameter+1],'c x y-> x y c')+control_points_coords[1,:]
+    grid=grid[1:,1:,:]
+    # print(f"\n ggggrid  \n {grid} \n  ")
+    # print(f"grid {grid}")
+
     grid_right= grid[-1,:,1]
     grid_bottom= grid[:,-1,0]
     grid=grid[0:-1,0:-1,:]
+
+
+    # print(f"grid {grid}")
+    # example=analyze_single_point(grid[1,1],triangles_data,control_points_coords )
+    # # print(f"eeeexample {example} \n point {grid[1,1]} \n triangles_data \n {triangles_data} \n control_points_coords \n {control_points_coords} \n")
+    # x_y=grid[1,2]
+    # print(f"x_y {x_y}")
+    # for triangle_dat in triangles_data:
+    #     is_in = is_point_in_triangle(x_y,control_points_coords[triangle_dat[0],:],control_points_coords[triangle_dat[1],:],control_points_coords[triangle_dat[2],:])
+    #     print(f"is_in {is_in} \n triangle_dat {triangle_dat} \n p1 {control_points_coords[triangle_dat[0],:]} \n p2  {control_points_coords[triangle_dat[1],:]} p3 {control_points_coords[triangle_dat[2],:]}")
+
     res=v_v_analyze_single_point(grid,triangles_data,control_points_coords)
     #analyze bottom and right border we assume that we are in square alpha so right border is between sv 1vs2 and bottom 2 vs 3
-    right=v_analyze_point_linear(grid_right,control_points_coords[4,1],1,2)
-    bottom=v_analyze_point_linear(grid_bottom,control_points_coords[6,0],2,3)
-    #recreate full grid
+    right=v_analyze_point_linear(grid_right,control_points_coords[4,1],3,2)
+    bottom=v_analyze_point_linear(grid_bottom,control_points_coords[6,0],1,2)
+
+    # right=right.at[0,:].set(0)
+    right=right.at[-1,:].set(0)
+    # bottom=bottom.at[0,:].set(0)
+    bottom=bottom.at[-1,:].set(0)
+
+    # right=right.at[0,1].set(1)
+    right=right.at[-1,2].set(1)
+
+    # bottom=bottom.at[0,3].set(1)
+    bottom=bottom.at[-1,2].set(1)
+
+    # recreate full grid
     res= jnp.pad(res,((0,1),(0,1),(0,0)))
     res=res.at[-1,:,:].set(right)
     res=res.at[:,-1,:].set(bottom)
     #reshuffle the order of channels so they id of svs will be consistent between areas
-    res=reshuffle_channels(res,sv_area_type)
+    
+
+    res=reshuffle_channels(res,sv_area_type) 
+
     #return 4 channel array where each channel tell about given sv and weather this point is owned but that sv
     return res
 
@@ -164,6 +215,8 @@ v_v_analyze_square=jax.vmap(v_analyze_square,in_axes=(0,None,None,0) )
 v_v_v_analyze_square=jax.vmap(v_v_analyze_square,in_axes=(0,None,None,0) )
 
 def analyze_all_control_points(grid_a_points,grid_b_points_x,grid_b_points_y,grid_c_points,pmapped_batch_size,sv_diameter):
+    # sv_diameter_orig=sv_diameter
+    # sv_diameter=sv_diameter-1
     #pad the grid control points so we can divide it basically we need to enlarge grid_a_points, grid_b_points_x and grid_b_points_y
     gridd_bigger=einops.rearrange(jnp.mgrid[-r:diam_x+2*r:r,-r:diam_y+2*r:r],'c x y-> x y c')-half_r
     grid_a_points_big=einops.rearrange(jnp.mgrid[0:diam_x+r:r, 0:diam_y+r:r],'c x y-> x y c')-half_r
@@ -196,23 +249,30 @@ def analyze_all_control_points(grid_a_points,grid_b_points_x,grid_b_points_y,gri
         ,grid_b_points_y_big[:,0:-1,:,:]#8
     ]
     control_points_coords=einops.rearrange(control_points_coords,'st b x y c ->b x y st c')
+    
     #we prepare data for vmapping - sv area type has this checkerboard organization
     triangles_data=get_triangles_data()
     shh= grid_c_points.shape
     sv_area_type=jnp.zeros((shh[1],shh[2]),dtype=int)
-    sv_area_type.at[1::2,0::2].set(3)
-    sv_area_type.at[1::2,1::2].set(2)
-    sv_area_type.at[0::2,1::2].set(1)
+    sv_area_type=sv_area_type.at[1::2,0::2].set(3)
+    sv_area_type=sv_area_type.at[1::2,1::2].set(2)
+    sv_area_type=sv_area_type.at[0::2,1::2].set(1)
     sv_area_type=einops.repeat(sv_area_type, 'x y->b x y', b=pmapped_batch_size)
+
+    print(f"sv_area_type \n {sv_area_type[0,:,:]}")
+
+    # example_coords=control_points_coords[0,1,2,:,:]
+    # print(f"control_points_coords {example_coords}")
+    # analyzed_example=analyze_square(example_coords ,sv_diameter,triangles_data,0)
+    # print(f"analyzed_example_coords \n {analyzed_example.shape} \n {analyzed_example[:,:,0]} ")
+
+
     #vmap over analyze_square    
     res=v_v_v_analyze_square(control_points_coords,sv_diameter,triangles_data,sv_area_type)
-
-    #select part that we are intrested in and subtract pad value from coordinates basically reverse padding 
-    ## cutting
+    # select part that we are intrested in and subtract pad value from coordinates basically reverse padding 
+    # cutting
     # res=res[:,1:-1,1:-1,:,:,:]
-    res= einops.rearrange(res,' b w h x y c-> b (w x) (h y) c')
-
-    
+    res= einops.rearrange(res,' b w h x y c-> b (w x) (h y) c')   
     #returns the 4 channel mask that encode the ownership of the pixels for each supervoxel
     return res
 
@@ -220,8 +280,8 @@ def analyze_all_control_points(grid_a_points,grid_b_points_x,grid_b_points_y,gri
 
 r=8
 half_r=r/2
-diam_x=48+r
-diam_y=48+r
+diam_x=32+r
+diam_y=32+r
 gridd=einops.rearrange(jnp.mgrid[r:diam_x:r, r:diam_y:r],'c x y-> x y c')-half_r
 gridd_bigger=einops.rearrange(jnp.mgrid[0:diam_x+r:r,0:diam_y+r:r],'c x y-> x y c')-half_r
 
@@ -242,10 +302,35 @@ grid_c_points=einops.repeat(grid_c_points, 'x y c->b x y c', b=pmapped_batch_siz
 ress=analyze_all_control_points(grid_a_points,grid_b_points_x,grid_b_points_y,grid_c_points,pmapped_batch_size,sv_diameter)
 print(ress.shape)
 
+
 mask0=ress[0,:,:,0]
-sns.heatmap(mask0)
-plt.savefig('/workspaces/jax_cpu_experiments_b/explore/example_mask0.png')
-plt.show()
+# sns.heatmap(mask0,ax=axs[0])
+# plt.savefig('/workspaces/jax_cpu_experiments_b/explore/example_mask0.png')
+# plt.show()
 mask1=ress[0,:,:,1]
-sns.heatmap(mask0)
-plt.savefig('/workspaces/jax_cpu_experiments_b/explore/example_mask1.png')
+# sns.heatmap(mask1)
+# plt.show()
+# plt.savefig('/workspaces/jax_cpu_experiments_b/explore/example_mask1.png')
+
+
+fig, axs = plt.subplots(ncols=4)
+sns.heatmap(mask0,ax=axs[0])
+sns.heatmap(mask1,ax=axs[1])
+sns.heatmap(ress[0,:,:,2],ax=axs[2])
+sns.heatmap(ress[0,:,:,3],ax=axs[3])
+plt.show()
+
+# mask1=ress[0,:,:,2]
+# sns.heatmap(mask1)
+# plt.show()
+# plt.savefig('/workspaces/jax_cpu_experiments_b/explore/example_mask2.png')
+
+# mask1=ress[0,:,:,3]
+# sns.heatmap(mask1)
+# plt.show()
+# plt.savefig('/workspaces/jax_cpu_experiments_b/explore/example_mask3.png')
+
+# mask_sum=jnp.sum(ress[0,:,:,:],axis=-1)
+# sns.heatmap(mask_sum)
+# plt.savefig('/workspaces/jax_cpu_experiments_b/explore/example_mask_sum.png')
+# plt.show()
