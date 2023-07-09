@@ -304,8 +304,8 @@ def analyze_all_control_points(grid_a_points,grid_b_points_x,grid_b_points_y,gri
 
 r=8
 half_r=r/2
-diam_x=32+r
-diam_y=32+r
+diam_x=32
+diam_y=32
 gridd=einops.rearrange(jnp.mgrid[r:diam_x:r, r:diam_y:r],'c x y-> x y c')-half_r
 gridd_bigger=einops.rearrange(jnp.mgrid[0:diam_x+r:r,0:diam_y+r:r],'c x y-> x y c')-half_r
 
@@ -316,12 +316,200 @@ grid_b_points_y= (gridd_bigger+jnp.array([0,half_r]))[1:-1,0:-1,:]
 
 
 
+
+
+
+
+
+
+######## random point mutation
+
+# weights=np.ones((grid_a_points.shape[0],grid_a_points.shape[1],8))*2
+# weights=np.ones_like(weights)#*110000000.0
+# weights[2,2,:]=-10000.0
+
+def get_contribution_in_axes(fixed_point,strength):
+    # print(f"fixed_point {fixed_point} strength {strength}")
+    e_x= jnp.array([1.0,0.0])
+    e_y= jnp.array([0.0,1.0])
+    x=optax.cosine_similarity(e_x,fixed_point)*strength
+    y=optax.cosine_similarity(e_y,fixed_point)*strength
+    return jnp.array([x,y])
+v_get_contribution_in_axes=jax.vmap(get_contribution_in_axes)
+
+
+def get_4_point_loc(points_const,point_weights,half_r):
+    half_r_bigger=half_r#*1.2
+    calced=v_get_contribution_in_axes(points_const,point_weights)
+
+    
+    calced=jnp.sum(calced,axis=0)
+    # calced=calced/(jnp.max(calced.flatten())+0.00001)
+    return calced*half_r_bigger
+
+def divide_my(el):
+    # print(f"aaaaaaaaaaaaa {el}")
+    res=el[0]/jnp.sum(el)
+    return jnp.array([res,1-res])
+v_divide_my= jax.vmap( divide_my,in_axes=0)
+v_v_divide_my= jax.vmap( v_divide_my,in_axes=0)
+
+def get_b_x_weights(weights):
+    weights_curr=weights[:,:,0:2] 
+    grid_b_points_x_weights_0=np.pad(weights_curr[:,:,0],((1,0),(0,0)))
+    grid_b_points_x_weights_1=np.pad(weights_curr[:,:,1],((0,1),(0,0)))
+    grid_b_points_x_weights= np.stack([grid_b_points_x_weights_0,grid_b_points_x_weights_1],axis=-1)
+    grid_b_points_x_weights=nn.sigmoid(grid_b_points_x_weights)
+    return v_v_divide_my(grid_b_points_x_weights)
+
+
+def get_b_y_weights(weights):
+    weights_curr=weights[:,:,2:4] 
+    grid_b_points_y_weights_0=np.pad(weights_curr[:,:,0],((0,0),(1,0)))
+    grid_b_points_y_weights_1=np.pad(weights_curr[:,:,1],((0,0),(0,1)))
+    grid_b_points_y_weights= np.stack([grid_b_points_y_weights_0,grid_b_points_y_weights_1],axis=-1)
+    grid_b_points_y_weights=nn.sigmoid(grid_b_points_y_weights)
+    return v_v_divide_my(grid_b_points_y_weights)
+# return nn.softmax(grid_b_points_y_weights*100,axis=-1)
+
+
+
+
+def get_for_four_weights(weights):
+    """ 
+        4- up_x,up_y
+        5- up_x,down_y
+        6- down_x,up_y
+        7- down_x,down_y
+    """
+    up_x_up_y=np.pad(weights[:,:,4],((1,0),(1,0)))
+    up_x_down_y=np.pad(weights[:,:,5],((1,0),(0,1)))
+    down_x_up_y=np.pad(weights[:,:,6],((0,1),(1,0)))
+    down_x_down_y=np.pad(weights[:,:,7],((0,1),(0,1)))
+
+    grid_c_points_weights=np.stack([up_x_up_y,up_x_down_y,down_x_up_y,down_x_down_y],axis=-1)
+    # print(f"grid_c_points_weights in get_for_four_weights {grid_c_points_weights} \n \n ")
+
+    # print(f"grid_c_points {grid_c_points.shape} grid_c_points_weights {grid_c_points_weights.shape}")
+    # return nn.tanh(grid_c_points_weights*100) 
+    return nn.softmax(grid_c_points_weights*100,axis=-1) 
+
+def apply_for_four_weights(grid_c_points_weight,grid_c_point,half_r):
+    points_const=jnp.stack([  jnp.array([-half_r,-half_r])
+                              ,jnp.array([-half_r,half_r])
+                              ,jnp.array([half_r,-half_r])
+                              ,jnp.array([half_r,half_r])
+                              ],axis=0)
+
+    calced=get_4_point_loc(points_const,grid_c_points_weight,half_r)
+
+    return calced+grid_c_point
+v_apply_for_four_weights=jax.vmap(apply_for_four_weights,in_axes=(0,0,None))
+v_v_apply_for_four_weights=jax.vmap(v_apply_for_four_weights,in_axes=(0,0,None))
+
+
+def move_in_axis(point,weights,axis,half_r ):
+    """ 
+    point can move up or down axis no more than half_r from current position 
+    weights indicate how strongly it shoul go down (element 0) and up the axis  
+    """
+    return point.at[axis].set(point[axis]-weights[0]*half_r + weights[1]*half_r)
+v_move_in_axis= jax.vmap(move_in_axis,in_axes=(0,0,None,None))
+v_v_move_in_axis= jax.vmap(v_move_in_axis,in_axes=(0,0,None,None))
+
+
+
+weights=(np.random.random((grid_a_points.shape[0],grid_a_points.shape[1],8))-0.5)*2
+
+grid_b_points_x_weights=get_b_x_weights(weights)
+grid_b_points_y_weights=get_b_y_weights(weights)
+
+print(f"grid_b_points_x {grid_b_points_x.shape} grid_b_points_x_weights {grid_b_points_x_weights.shape} ")
+
+grid_b_points_x=v_v_move_in_axis(grid_b_points_x,grid_b_points_x_weights,0, half_r)
+grid_b_points_y=v_v_move_in_axis(grid_b_points_y,grid_b_points_y_weights,1, half_r)
+
+# grid_c_points_weights=get_for_four_weights(weights)
+# grid_c_points=v_v_apply_for_four_weights(grid_c_points_weights,grid_c_points,half_r)
+
+
+
+
+
+
+####################3 end random point mutation
+###########3just points display
+
+
+def disp_grid(grid_a_points,grid_b_points_x,grid_b_points_y,grid_c_points):
+
+    c_a=np.ones_like(grid_a_points[:,:,1])-0.9
+    c_b_x=np.ones_like(grid_b_points_x[:,:,1])+0.9
+    c_b_y=np.ones_like(grid_b_points_y[:,:,1])+0.9
+    c_c=np.ones_like(grid_c_points[:,:,1])+2.0
+
+
+    s_a=np.ones_like(grid_a_points[:,:,1])
+    s_b_x=np.ones_like(grid_b_points_x[:,:,1])
+    s_b_y=np.ones_like(grid_b_points_y[:,:,1])
+    s_c=np.ones_like(grid_c_points[:,:,1])
+    base_x=2
+    base_y=2
+
+    # s_a[base_x,base_y]=s_a[0,0]*4
+    # s_b_x[base_x,base_y]=s_b_x[0,0]*4
+    # s_b_y[base_x,base_y]=s_b_y[0,0]*4
+    # s_b_x[base_x+1,base_y]=s_b_x[0,0]*4
+    # s_b_y[base_x,base_y+1]=s_b_y[0,0]*4
+
+    # s_c[base_x,base_y]=s_c[0,0]*4
+    # s_c[base_x,base_y+1]=s_c[0,0]*4
+    # s_c[base_x+1,base_y]=s_c[0,0]*4
+    # s_c[base_x+1,base_y+1]=s_c[0,0]*4
+
+
+    grid_b_points_x=einops.rearrange(grid_b_points_x,'x y c-> (x y) c')
+    grid_b_points_y=einops.rearrange(grid_b_points_y,'x y c-> (x y) c')
+    grid_c_points=einops.rearrange(grid_c_points,'x y c-> (x y) c')
+    grid_a_points=einops.rearrange(grid_a_points,'x y c-> (x y) c')
+
+    grid_b_points= jnp.concatenate([grid_b_points_x,grid_b_points_y])
+    x=jnp.concatenate([grid_a_points[:,0],grid_b_points[:,0],grid_c_points[:,0]])
+    y=jnp.concatenate([grid_a_points[:,1],grid_b_points[:,1],grid_c_points[:,1]])
+
+    c= jnp.concatenate([c_a.flatten(),c_b_x.flatten(),c_b_y.flatten(),c_c.flatten()])
+    s=jnp.concatenate([s_a.flatten(),s_b_x.flatten(),s_b_y.flatten(),s_c.flatten()])*15
+    plt.scatter(x,y,s=s,c=c,alpha=0.7)
+    file_name=f"/workspaces/jax_cpu_experiments_b/explore/points.png"
+    plt.savefig(file_name)
+    plt.clf()
+
+
+disp_grid(grid_a_points,grid_b_points_x,grid_b_points_y,grid_c_points)
+
+
+
+
+
+
+
+
+############# end points display
+
+
+
+
+
+
+
 sv_diameter=r
 pmapped_batch_size=1
 grid_a_points=einops.repeat(grid_a_points, 'x y c->b x y c', b=pmapped_batch_size) 
 grid_b_points_x=einops.repeat(grid_b_points_x, 'x y c->b x y c', b=pmapped_batch_size) 
 grid_b_points_y=einops.repeat(grid_b_points_y, 'x y c->b x y c', b=pmapped_batch_size) 
 grid_c_points=einops.repeat(grid_c_points, 'x y c->b x y c', b=pmapped_batch_size) 
+
+
 
 
 
