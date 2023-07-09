@@ -49,7 +49,7 @@ def is_point_in_triangle(test_point,sv_center,control_point_a,control_point_b):
     subtriangles_area= sub_a+sub_b+sub_c
     area_diff=main_triangle_area-subtriangles_area
     area_diff=jnp.power(area_diff,2)
-    return 1-(nn.sigmoid(area_diff*5000)-0.5)*2
+    return 1-(nn.sigmoid(area_diff*15)-0.5)*2
 
 
 
@@ -119,7 +119,7 @@ def analyze_point_linear(curr_point, control_point,channel_up,channel_down):
     channel_down - the channel owned by the sv down the axis
     """
     #will give close to 1 if test point is maller than control
-    is_test_smaller_than_control=nn.sigmoid( (control_point-curr_point)*100 )
+    is_test_smaller_than_control=nn.sigmoid( (control_point-curr_point)*10 )
     res=jnp.zeros(4)
     res=res.at[channel_up].set(is_test_smaller_than_control)
     res=res.at[channel_down].set(1-is_test_smaller_than_control)
@@ -420,6 +420,11 @@ v_v_move_in_axis= jax.vmap(v_move_in_axis,in_axes=(0,0,None,None))
 
 
 weights=(np.random.random((grid_a_points.shape[0],grid_a_points.shape[1],8))-0.5)*2
+# weights=(np.random.random((grid_a_points.shape[0],grid_a_points.shape[1],8)))/2
+
+# weights= jnp.ones_like(weights)
+# weights=weights.at[1,1,:].set(3.0)
+
 
 grid_b_points_x_weights=get_b_x_weights(weights)
 grid_b_points_y_weights=get_b_y_weights(weights)
@@ -429,8 +434,8 @@ print(f"grid_b_points_x {grid_b_points_x.shape} grid_b_points_x_weights {grid_b_
 grid_b_points_x=v_v_move_in_axis(grid_b_points_x,grid_b_points_x_weights,0, half_r)
 grid_b_points_y=v_v_move_in_axis(grid_b_points_y,grid_b_points_y_weights,1, half_r)
 
-# grid_c_points_weights=get_for_four_weights(weights)
-# grid_c_points=v_v_apply_for_four_weights(grid_c_points_weights,grid_c_points,half_r)
+grid_c_points_weights=get_for_four_weights(weights)
+grid_c_points=v_v_apply_for_four_weights(grid_c_points_weights,grid_c_points,half_r)
 
 
 
