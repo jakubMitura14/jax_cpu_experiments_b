@@ -7,7 +7,16 @@ import jax
 from flax import linen as nn
 import einops
 import seaborn as sns
-
+from itertools import permutations
+from itertools import product
+import numpy as np
+import matplotlib.pyplot as plt
+import ipympl
+import imageio.v3 as iio
+import skimage.color
+import skimage.filters
+import skimage.measure
+import os
 
 def differentiable_abs(x):
     """ 
@@ -53,25 +62,25 @@ def get_triangles_data():
     single triangle data will consist of 4 entries - first 3 will be verticies ids as in image and the last one the id of the sv that is owner of this node
         as in the alpha order 
     """
-    return jnp.array([[0,8,1,0]#A
-         ,[0,1,2,0]#B
-         ,[0,2,3,3]#C
-         ,[0,3,4,3]#D
-         ,[0,4,5,2]#L
-         ,[0,5,6,2]#K
-         ,[0,6,7,1]#J
-         ,[0,7,8,1]]#I
-        )
-
     # return jnp.array([[0,8,1,0]#A
     #      ,[0,1,2,0]#B
-    #      ,[0,2,3,1]#C
-    #      ,[0,3,4,1]#D
+    #      ,[0,2,3,3]#C
+    #      ,[0,3,4,3]#D
     #      ,[0,4,5,2]#L
     #      ,[0,5,6,2]#K
-    #      ,[0,6,7,3]#J
-    #      ,[0,7,8,3]]#I
+    #      ,[0,6,7,1]#J
+    #      ,[0,7,8,1]]#I
     #     )
+
+    return jnp.array([[0,8,1,0]#A
+         ,[0,1,2,0]#B
+         ,[0,2,3,1]#C
+         ,[0,3,4,1]#D
+         ,[0,4,5,2]#L
+         ,[0,5,6,2]#K
+         ,[0,6,7,3]#J
+         ,[0,7,8,3]]#I
+        )
 
 
 def analyze_single_triangle(curried,triangle_dat):
@@ -118,31 +127,37 @@ def analyze_point_linear(curr_point, control_point,channel_up,channel_down):
 
 v_analyze_point_linear= jax.vmap(analyze_point_linear,in_axes=(0,None,None,None))
 
-def reshuffle_channels(res,sv_area_type):
+def reshuffle_channels(res,sv_area_type,debug_index):
     """ 
     sv_area_type - we have 4 sv_area_type in first node 0 is in upper left corner and we go clockwise so bottom left is 3
         other sv types are set in a way to be consistent with first sv_area_type
     we get res as the input that has the channels organised as if it is first type this funtion is to fix it
     """
+    p = permutations([0,1,2,3])
+    p=list(p)
+    prod=list(product(p,p,p))
+    
+
+
     def alfa():
         return res
         
     def beta():
         #0 1 2 3 -> 1 0 3 2
+        return res[:,:, jnp.array([3, 2, 1, 0])]
         # return res[:,:, jnp.array([1,0,3,2])]
-        return res[:,:, jnp.array([1,0,3,2])]
-        # return res
+        return res
         
     def delta():
         #0 1 2 3 -> 3 2 1 0
-        return res[:,:, jnp.array([1,0,3,2])]
-        # return res[:,:, jnp.array([1,2,3,0])]
+        return res[:,:, jnp.array([2, 3, 0, 1])]   
+        # return res[:,:, jnp.array([2,1,0,3])]
         # return res
 
     def gamma():
         #0 1 2 3 -> 2 3 0 1
         # return res[:,:, jnp.array([2,3,0,1])]
-        # return res[:,:, jnp.array([0,1,2,3])]
+        return res[:,:, jnp.array([1, 0, 3, 2])]
         return res
 
 
@@ -153,7 +168,7 @@ def reshuffle_channels(res,sv_area_type):
 
 
 def analyze_square(control_points_coords,diameter
-                   ,triangles_data,sv_area_type):
+                   ,triangles_data,sv_area_type,debug_index):
     """ 
     analyzing single square where each corner is created by sv center
     triangles_data- constants describing triangles specified in get_triangles_data function
@@ -184,8 +199,8 @@ def analyze_square(control_points_coords,diameter
 
     res=v_v_analyze_single_point(grid,triangles_data,control_points_coords)
     #analyze bottom and right border we assume that we are in square alpha so right border is between sv 1vs2 and bottom 2 vs 3
-    right=v_analyze_point_linear(grid_right,control_points_coords[4,1],3,2)
-    bottom=v_analyze_point_linear(grid_bottom,control_points_coords[6,0],1,2)
+    right=v_analyze_point_linear(grid_right,control_points_coords[4,1],1,2)
+    bottom=v_analyze_point_linear(grid_bottom,control_points_coords[6,0],3,2)
 
     # right=right.at[0,:].set(0)
     right=right.at[-1,:].set(0)
@@ -203,18 +218,19 @@ def analyze_square(control_points_coords,diameter
     res=res.at[-1,:,:].set(right)
     res=res.at[:,-1,:].set(bottom)
     #reshuffle the order of channels so they id of svs will be consistent between areas
-    
+    # diameter_h= (diameter-1)//2
+    # res= res.at[diameter_h,diameter_h,:].set(2)#TODO remove
 
-    res=reshuffle_channels(res,sv_area_type) 
+    res=reshuffle_channels(res,sv_area_type,debug_index) 
 
     #return 4 channel array where each channel tell about given sv and weather this point is owned but that sv
     return res
 
-v_analyze_square=jax.vmap(analyze_square,in_axes=(0,None,None,0) )
-v_v_analyze_square=jax.vmap(v_analyze_square,in_axes=(0,None,None,0) )
-v_v_v_analyze_square=jax.vmap(v_v_analyze_square,in_axes=(0,None,None,0) )
+v_analyze_square=jax.vmap(analyze_square,in_axes=(0,None,None,0,None) )
+v_v_analyze_square=jax.vmap(v_analyze_square,in_axes=(0,None,None,0,None) )
+v_v_v_analyze_square=jax.vmap(v_v_analyze_square,in_axes=(0,None,None,0,None) )
 
-def analyze_all_control_points(grid_a_points,grid_b_points_x,grid_b_points_y,grid_c_points,pmapped_batch_size,sv_diameter):
+def analyze_all_control_points(grid_a_points,grid_b_points_x,grid_b_points_y,grid_c_points,pmapped_batch_size,sv_diameter,debug_index):
     # sv_diameter_orig=sv_diameter
     # sv_diameter=sv_diameter-1
     #pad the grid control points so we can divide it basically we need to enlarge grid_a_points, grid_b_points_x and grid_b_points_y
@@ -259,7 +275,7 @@ def analyze_all_control_points(grid_a_points,grid_b_points_x,grid_b_points_y,gri
     sv_area_type=sv_area_type.at[0::2,1::2].set(1)
     sv_area_type=einops.repeat(sv_area_type, 'x y->b x y', b=pmapped_batch_size)
 
-    print(f"sv_area_type \n {sv_area_type[0,:,:]}")
+    # print(f"sv_area_type \n {sv_area_type[0,:,:]}")
 
     # example_coords=control_points_coords[0,1,2,:,:]
     # print(f"control_points_coords {example_coords}")
@@ -268,11 +284,19 @@ def analyze_all_control_points(grid_a_points,grid_b_points_x,grid_b_points_y,gri
 
 
     #vmap over analyze_square    
-    res=v_v_v_analyze_square(control_points_coords,sv_diameter,triangles_data,sv_area_type)
+    res=v_v_v_analyze_square(control_points_coords,sv_diameter,triangles_data,sv_area_type,debug_index)
+
+
     # select part that we are intrested in and subtract pad value from coordinates basically reverse padding 
     # cutting
     # res=res[:,1:-1,1:-1,:,:,:]
     res= einops.rearrange(res,' b w h x y c-> b (w x) (h y) c')   
+
+    # grid_c_points_f= einops.rearrange(grid_c_points[0,:,:,:],'x y c->(x y) c')
+    # for coord in grid_c_points_f: #TODO remove
+    #     print(coord)
+    #     res=res.at[:,int(coord[0])+4,int(coord[1])+4,:].set(2)
+
     #returns the 4 channel mask that encode the ownership of the pixels for each supervoxel
     return res
 
@@ -299,9 +323,23 @@ grid_b_points_x=einops.repeat(grid_b_points_x, 'x y c->b x y c', b=pmapped_batch
 grid_b_points_y=einops.repeat(grid_b_points_y, 'x y c->b x y c', b=pmapped_batch_size) 
 grid_c_points=einops.repeat(grid_c_points, 'x y c->b x y c', b=pmapped_batch_size) 
 
-ress=analyze_all_control_points(grid_a_points,grid_b_points_x,grid_b_points_y,grid_c_points,pmapped_batch_size,sv_diameter)
-print(ress.shape)
 
+
+
+def connected_components(image, sigma=1.0, t=0.0001, connectivity=2):
+    # load the image
+    # image = iio.imread(filename)
+    # mask the image according to threshold
+    binary_mask = image >0
+    # perform connected component analysis
+    labeled_image, count = skimage.measure.label(binary_mask,
+                                                 connectivity=connectivity, return_num=True)
+    return labeled_image, count
+
+debug_index=0
+# for debug_index in range(13824):
+ress=analyze_all_control_points(grid_a_points,grid_b_points_x,grid_b_points_y,grid_c_points,pmapped_batch_size,sv_diameter,debug_index)
+print(ress.shape)
 
 mask0=ress[0,:,:,0]
 # sns.heatmap(mask0,ax=axs[0])
@@ -313,12 +351,28 @@ mask1=ress[0,:,:,1]
 # plt.savefig('/workspaces/jax_cpu_experiments_b/explore/example_mask1.png')
 
 
-fig, axs = plt.subplots(ncols=4)
-sns.heatmap(mask0,ax=axs[0])
-sns.heatmap(mask1,ax=axs[1])
-sns.heatmap(ress[0,:,:,2],ax=axs[2])
-sns.heatmap(ress[0,:,:,3],ax=axs[3])
-plt.show()
+fig, axs = plt.subplots(nrows=2,ncols=2)
+_,count0=connected_components(ress[0,:,:,0])
+_,count1=connected_components(ress[0,:,:,1])
+_,count2=connected_components(ress[0,:,:,2])
+_,count3=connected_components(ress[0,:,:,3])
+
+sns.heatmap(mask0,ax=axs[0,0]).legend([],[], frameon=False)
+sns.heatmap(mask1,ax=axs[0,1]).legend([],[], frameon=False)
+sns.heatmap(ress[0,:,:,2],ax=axs[1,0]).legend([],[], frameon=False)
+sns.heatmap(ress[0,:,:,3],ax=axs[1,1]).legend([],[], frameon=False)
+
+sum_count= count0+count1+count2+count3
+# os.makedirs(f"/workspaces/jax_cpu_experiments_b/explore/debuggin_reshuffle_channels/{}" ,exist_ok = True)
+
+# file_name=f"/workspaces/jax_cpu_experiments_b/explore/debuggin_reshuffle_channels/example_mask{debug_index}.png"
+file_name=f"/workspaces/jax_cpu_experiments_b/explore/example_mask_sum.png"
+plt.savefig(file_name)
+
+
+print(f"debug_index {debug_index} count {sum_count}")
+# plt.show()
+plt.clf()
 
 # mask1=ress[0,:,:,2]
 # sns.heatmap(mask1)
