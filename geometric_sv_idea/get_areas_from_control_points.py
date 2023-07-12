@@ -319,8 +319,8 @@ def analyze_all_control_points(grid_a_points,grid_b_points_x,grid_b_points_y,gri
 
 r=8
 half_r=r/2
-diam_x=32 +r#256+r
-diam_y=32 +r#256+r
+diam_x=64 +r#256+r
+diam_y=64 +r#256+r
 gridd=einops.rearrange(jnp.mgrid[r:diam_x:r, r:diam_y:r],'c x y-> x y c')-half_r
 gridd_bigger=einops.rearrange(jnp.mgrid[0:diam_x+r:r,0:diam_y+r:r],'c x y-> x y c')-half_r
 
@@ -568,18 +568,22 @@ _,count2=connected_components(ress[0,:,:,2])
 _,count3=connected_components(ress[0,:,:,3])
 
 sns.heatmap(mask0,ax=axs[0,0]).legend([],[], frameon=False)
-monox =-8
-monoy =0
+monox =-13
+monoy =-5
 # monox =(r//2)+1
 # monoy =(r//2)+1
-nexttx=(2*r)-4
-nextty=(2*r)-4
+nexttx=(2*r)
+nextty=(2*r)
 plt.axhline(y=monox) 
 plt.axvline(x=monoy) 
 plt.axhline(y=monox+nexttx) 
 plt.axvline(x=monoy+nextty) 
 plt.axhline(y=monox+nexttx*2) 
 plt.axvline(x=monoy+nextty*2) 
+plt.axhline(y=monox+nexttx*3) 
+plt.axvline(x=monoy+nextty*3) 
+plt.axhline(y=monox+nexttx*4) 
+plt.axvline(x=monoy+nextty*4) 
 
 sns.heatmap(mask1,ax=axs[0,1]).legend([],[], frameon=False)
 sns.heatmap(ress[0,:,:,2],ax=axs[1,0]).legend([],[], frameon=False)
