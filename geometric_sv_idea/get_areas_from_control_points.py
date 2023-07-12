@@ -17,6 +17,9 @@ import skimage.color
 import skimage.filters
 import skimage.measure
 import os
+from .shape_reshape_functions import *
+from functools import partial
+import math
 
 def differentiable_abs(x):
     """ 
@@ -104,7 +107,7 @@ def analyze_single_point(x_y,triangles_data,control_points_coords):
     """
     curried=x_y,control_points_coords,jnp.zeros(4)
     res,_= jax.lax.scan(analyze_single_triangle,curried, triangles_data)
-    return res[2]/jnp.sum(res[2])
+    return (res[2]+0.000000000000000000000000000000001)/(jnp.sum(res[2])+0.000000000000000000000000000000001)
 
 v_analyze_single_point=jax.vmap(analyze_single_point,in_axes=(0,None,None))
 v_v_analyze_single_point=jax.vmap(v_analyze_single_point,in_axes=(0,None,None))
@@ -133,9 +136,9 @@ def reshuffle_channels(res,sv_area_type,debug_index):
         other sv types are set in a way to be consistent with first sv_area_type
     we get res as the input that has the channels organised as if it is first type this funtion is to fix it
     """
-    p = permutations([0,1,2,3])
-    p=list(p)
-    prod=list(product(p,p,p))
+    # p = permutations([0,1,2,3])
+    # p=list(p)
+    # prod=list(product(p,p,p))
     
 
 
@@ -230,7 +233,15 @@ v_analyze_square=jax.vmap(analyze_square,in_axes=(0,None,None,0,None) )
 v_v_analyze_square=jax.vmap(v_analyze_square,in_axes=(0,None,None,0,None) )
 v_v_v_analyze_square=jax.vmap(v_v_analyze_square,in_axes=(0,None,None,0,None) )
 
-def analyze_all_control_points(grid_a_points,grid_b_points_x,grid_b_points_y,grid_c_points,pmapped_batch_size,sv_diameter,debug_index):
+@partial(jax.jit, static_argnames=['pmapped_batch_size','sv_diameter','r','diam_x','diam_y','half_r'])
+def analyze_all_control_points(grid_a_points,grid_b_points_x,grid_b_points_y,grid_c_points
+                               ,pmapped_batch_size,sv_diameter
+                               ,r,diam_x,diam_y,half_r):
+    
+    # print(f"uuuuuuuuuuu grid_a_points {grid_a_points.shape} grid_b_points_x {grid_b_points_x.shape} grid_b_points_y {grid_b_points_y.shape} grid_c_points {grid_c_points.shape} pmapped_batch_size {pmapped_batch_size} sv_diameter {sv_diameter} r {r} diam_x {diam_x} diam_y {diam_y} half_r {half_r}")
+
+    debug_index=0
+    
     # sv_diameter_orig=sv_diameter
     # sv_diameter=sv_diameter-1
     #pad the grid control points so we can divide it basically we need to enlarge grid_a_points, grid_b_points_x and grid_b_points_y
@@ -283,15 +294,19 @@ def analyze_all_control_points(grid_a_points,grid_b_points_x,grid_b_points_y,gri
     # print(f"analyzed_example_coords \n {analyzed_example.shape} \n {analyzed_example[:,:,0]} ")
 
 
-    #vmap over analyze_square    
+    #vmap over analyze_square   
+    # print(f"vvv control_points_coords {control_points_coords.shape} sv_diameter {sv_diameter} triangles_data {triangles_data.shape}") 
     res=v_v_v_analyze_square(control_points_coords,sv_diameter,triangles_data,sv_area_type,debug_index)
 
 
     # select part that we are intrested in and subtract pad value from coordinates basically reverse padding 
     # cutting
     # res=res[:,1:-1,1:-1,:,:,:]
-    res= einops.rearrange(res,' b w h x y c-> b (w x) (h y) c')   
 
+    res= einops.rearrange(res,' b w h x y c-> b (w x) (h y) c')   
+    print(f"tttt res {res.shape} half_r {half_r} ")
+    half_r=int(half_r)
+    res=res[:,half_r:-half_r,half_r:-half_r,:]
     # grid_c_points_f= einops.rearrange(grid_c_points[0,:,:,:],'x y c->(x y) c')
     # for coord in grid_c_points_f: #TODO remove
     #     print(coord)
@@ -304,8 +319,8 @@ def analyze_all_control_points(grid_a_points,grid_b_points_x,grid_b_points_y,gri
 
 r=8
 half_r=r/2
-diam_x=32
-diam_y=32
+diam_x=32 +r#256+r
+diam_y=32 +r#256+r
 gridd=einops.rearrange(jnp.mgrid[r:diam_x:r, r:diam_y:r],'c x y-> x y c')-half_r
 gridd_bigger=einops.rearrange(jnp.mgrid[0:diam_x+r:r,0:diam_y+r:r],'c x y-> x y c')-half_r
 
@@ -314,7 +329,7 @@ grid_c_points=(gridd_bigger+jnp.array([half_r,half_r]))[0:-1,0:-1,:]
 grid_b_points_x= (gridd_bigger+jnp.array([half_r,0.0]))[0:-1,1:-1,:]
 grid_b_points_y= (gridd_bigger+jnp.array([0,half_r]))[1:-1,0:-1,:]
 
-
+print(f"aaaa grid_a_points {grid_a_points.shape}")
 
 
 
@@ -531,7 +546,9 @@ def connected_components(image, sigma=1.0, t=0.0001, connectivity=2):
 
 debug_index=0
 # for debug_index in range(13824):
-ress=analyze_all_control_points(grid_a_points,grid_b_points_x,grid_b_points_y,grid_c_points,pmapped_batch_size,sv_diameter,debug_index)
+ress=analyze_all_control_points(grid_a_points,grid_b_points_x,grid_b_points_y,grid_c_points
+                               ,pmapped_batch_size,sv_diameter
+                               ,r,diam_x,diam_y,half_r)
 print(ress.shape)
 
 mask0=ress[0,:,:,0]
@@ -551,6 +568,19 @@ _,count2=connected_components(ress[0,:,:,2])
 _,count3=connected_components(ress[0,:,:,3])
 
 sns.heatmap(mask0,ax=axs[0,0]).legend([],[], frameon=False)
+monox =-8
+monoy =0
+# monox =(r//2)+1
+# monoy =(r//2)+1
+nexttx=(2*r)-4
+nextty=(2*r)-4
+plt.axhline(y=monox) 
+plt.axvline(x=monoy) 
+plt.axhline(y=monox+nexttx) 
+plt.axvline(x=monoy+nextty) 
+plt.axhline(y=monox+nexttx*2) 
+plt.axvline(x=monoy+nextty*2) 
+
 sns.heatmap(mask1,ax=axs[0,1]).legend([],[], frameon=False)
 sns.heatmap(ress[0,:,:,2],ax=axs[1,0]).legend([],[], frameon=False)
 sns.heatmap(ress[0,:,:,3],ax=axs[1,1]).legend([],[], frameon=False)
@@ -559,13 +589,46 @@ sum_count= count0+count1+count2+count3
 # os.makedirs(f"/workspaces/jax_cpu_experiments_b/explore/debuggin_reshuffle_channels/{}" ,exist_ok = True)
 
 # file_name=f"/workspaces/jax_cpu_experiments_b/explore/debuggin_reshuffle_channels/example_mask{debug_index}.png"
-file_name=f"/workspaces/jax_cpu_experiments_b/explore/example_mask_sum.png"
+file_name=f"/workspaces/jax_cpu_experiments_b/explore/all_masks.png"
 plt.savefig(file_name)
-
-
-print(f"debug_index {debug_index} count {sum_count}")
-# plt.show()
 plt.clf()
+
+
+# print(f"debug_index {debug_index} count {sum_count}  minn {jnp.min(ress.flatten())} maxx {jnp.max(ress.flatten())} ")
+# # plt.show()
+# plt.clf()
+
+diam_x=32 #256+r
+diam_y=32 #256+r
+img_size=(1,diam_x,diam_y)
+orig_grid_shape=grid_a_points.shape
+sh_re_cfgs=get_all_shape_reshape_constants((r*2)+1,(r*2)+1,img_size ,orig_grid_shape )
+
+# divided_masks= list(map(lambda i : divide_sv_grid(ress,sh_re_cfgs[i]) ,range(4)  ))
+
+# print(f"aaaassss {divided_masks[0].shape}")
+
+# disp = divided_masks[0][0,:,:,:,0]
+disp =mask0# ress[0,:,:,0]
+print(f"ddd disp {disp.shape}")
+
+sizee= (r*2)+1
+beg_pad = int(r//2)+1
+
+padded_sh= beg_pad+disp.shape[0]
+end_pad= math.ceil(padded_sh/sizee)*sizee
+end_pad=end_pad-padded_sh
+
+# disp= jnp.pad(disp,((beg_pad,end_pad),(beg_pad,end_pad)))
+# disp= einops.rearrange(disp,'(xb xa) (yb ya)-> (xb yb) xa ya', xa = sizee, ya=sizee)
+# for i in range(disp.shape[0]):
+#     sns.heatmap(disp[i,:,:])
+#     path= f"/workspaces/jax_cpu_experiments_b/explore/debuggin_reshuffle_channels/subm{i}.png"
+#     plt.savefig(path)
+
+#     plt.clf()
+#     # plt.show()
+    
 
 # mask1=ress[0,:,:,2]
 # sns.heatmap(mask1)
@@ -581,3 +644,14 @@ plt.clf()
 # sns.heatmap(mask_sum)
 # plt.savefig('/workspaces/jax_cpu_experiments_b/explore/example_mask_sum.png')
 # plt.show()
+
+
+# main grid_a_points (1, 32, 32, 2) grid_b_points_x (1, 33, 32, 2) grid_b_points_y (1, 32, 33, 2) grid_c_points (1, 33, 33, 2) pmapped_batch_size 1 sv_diameter 16 r 8 diam_x 264 diam_y 264 half_r 
+# loca grid_a_points (1, 32, 32, 2) grid_b_points_x (1, 33, 32, 2) grid_b_points_y (1, 32, 33, 2) grid_c_points (1, 33, 33, 2) pmapped_batch_size 1 sv_diameter 16 r 8 diam_x 264 diam_y 264 half_r 
+
+
+# vvv control_points_coords (1, 33, 33, 9, 2) sv_diameter 16 triangles_data (8, 4)
+# 0 rrrrrrrrr (1, 33, 33, 16, 16, 4)
+
+
+# python3 -m geometric_sv_idea.get_areas_from_control_points
