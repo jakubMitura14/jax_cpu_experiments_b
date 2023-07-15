@@ -606,33 +606,46 @@ diam_x=32 #256+r
 diam_y=32 #256+r
 img_size=(1,diam_x,diam_y)
 orig_grid_shape=grid_a_points.shape
-sh_re_cfgs=get_all_shape_reshape_constants((r*2)+1,(r*2)+1,img_size ,orig_grid_shape )
 
-# divided_masks= list(map(lambda i : divide_sv_grid(ress,sh_re_cfgs[i]) ,range(4)  ))
+sh_re_consts=get_simple_sh_resh_consts(img_size,r)
+disp= list(map(lambda i: reshape_to_svs(ress,sh_re_consts[i],i) ,range(4)))
+disp= jnp.concatenate(disp,axis=1)
 
-# print(f"aaaassss {divided_masks[0].shape}")
-
-# disp = divided_masks[0][0,:,:,:,0]
-disp =mask0# ress[0,:,:,0]
-print(f"ddd disp {disp.shape}")
-
-sizee= (r*2)+1
-beg_pad = int(r//2)+1
-
-padded_sh= beg_pad+disp.shape[0]
-end_pad= math.ceil(padded_sh/sizee)*sizee
-end_pad=end_pad-padded_sh
-
-# disp= jnp.pad(disp,((beg_pad,end_pad),(beg_pad,end_pad)))
-# disp= einops.rearrange(disp,'(xb xa) (yb ya)-> (xb yb) xa ya', xa = sizee, ya=sizee)
-# for i in range(disp.shape[0]):
-#     sns.heatmap(disp[i,:,:])
-#     path= f"/workspaces/jax_cpu_experiments_b/explore/debuggin_reshuffle_channels/subm{i}.png"
-#     plt.savefig(path)
-
-#     plt.clf()
+for i in range(disp.shape[1]):
+    sns.heatmap(disp[0,i,:,:])
+    path= f"/workspaces/jax_cpu_experiments_b/explore/debuggin_reshuffle_channels/subm{i}.png"
+    plt.savefig(path)
+    plt.clf()
 #     # plt.show()
     
+
+
+
+
+
+""" 
+sizee= (r*2)
+
+
+for mask 0 
+beg_pad_x = r+int(r//2)+1
+beg_pad_y = r+int(r//2)+1
+
+for mask 1 
+beg_pad_x = int(r//2)+1
+beg_pad_y = r+int(r//2)+1
+
+for mask 2
+beg_pad_x = int(r//2)+1
+beg_pad_y = int(r//2)+1
+
+for mask 3 
+beg_pad_x = r+int(r//2)+1
+beg_pad_y = int(r//2)+1
+
+"""
+
+
 
 # mask1=ress[0,:,:,2]
 # sns.heatmap(mask1)
