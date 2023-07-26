@@ -1,0 +1,2 @@
+plane - plane intersection
+https://gist.github.com/marmakoide/79f361dd613f2076ece544070ddae6ab
