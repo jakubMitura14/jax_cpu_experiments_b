@@ -56,6 +56,91 @@ def is_point_in_triangle(test_point,sv_center,control_point_a,control_point_b):
 
 
 
+def lineLineIntersection(A, B, C, D):
+    """ 
+    based on https://www.geeksforgeeks.org/program-for-point-of-intersection-of-two-lines/
+    """
+    # Line AB represented as a1x + b1y = c1
+    a1 = B[1] - A[1]
+    b1 = A[0] - B[0]
+    c1 = a1*(A[0]) + b1*(A[1])
+ 
+    # Line CD represented as a2x + b2y = c2
+    a2 = D[1] - C[1]
+    b2 = C[0] - D[0]
+    c2 = a2*(C[0]) + b2*(C[1])
+    
+
+    determinant = (a1*b2 - a2*b1)+0.000000000001
+    
+    # if (determinant == 0):
+    #     # The lines are parallel. This is simplified
+    #     # by returning a pair of FLT_MAX
+    #     return Point(10**9, 10**9)
+    # else:
+    x = (b2*c1 - b1*c2)/determinant
+    y = (a1*c2 - a2*c1)/determinant
+    return jnp.array([x, y])
+
+def orthoProjection(vertex_a,vertex_b,vertex_c):
+    """ 
+    projection of a point on a line 
+    adapted from https://stackoverflow.com/questions/55230528/find-point-where-altitude-meets-base-python
+    """
+    # abx = bx - ax
+    abx = vertex_b[0] - vertex_a[0]
+    # aby = by - ay
+    aby = vertex_b[1] - vertex_a[1]
+    # acx = cx - ax
+    acx = vertex_c[0] - vertex_a[0]
+    # acy = cy - ay
+    acy = vertex_c[1] - vertex_a[1]
+    t = (abx * acx + aby * acy) / ((abx * abx + aby * aby)+0.000000001)
+    # px = ax + t * abx
+    px = vertex_a[0] + t * abx
+    # py = ay + t * aby
+    py = vertex_a[1] + t * aby
+    return jnp.array([px, py])
+
+
+def get_point_on_a_line_b(vertex_0,vertex_1,weight):
+    diff_x=vertex_1[0]-vertex_0[0]
+    diff_y=vertex_1[1]-vertex_0[1]
+    # weight=weight/2+1.5
+    # weight=(weight*2)
+
+    # C=jnp.array([vertex_0[0]+(diff_x*weight), vertex_0[1]])
+    # D=jnp.array([vertex_0[0],vertex_0[1]+(diff_y*weight)])
+
+    # alpha=np.pi/4
+    # beta=-np.pi/4
+    # a= vertex_0
+    # #just multiplied by rotation matrix, we divide by square root of 2 in order to keep the weights in domain 1 to two
+    # C= np.array([  a[0]*np.cos(alpha) + a[1]*np.sin(alpha), -a[0]*np.sin(alpha) + a[1]*np.cos(alpha)])/np.sqrt(2)
+    # D= np.array([  a[0]*np.cos(beta) + a[1]*np.sin(beta), -a[0]*np.sin(beta) + a[1]*np.cos(beta)])/np.sqrt(2)
+    
+    # C=C*weight
+    # D=D*weight
+    # print(f"C {C} D {D} diff_x {diff_x} diff_y {diff_y}  vertex_0[0]{vertex_0[0]} diff_x*weight {diff_x*weight} sum {vertex_0[0]+(diff_x*weight)}")
+    # return lineLineIntersection(vertex_0, vertex_1, C, D)
+    return np.array([vertex_0[0]+(diff_x*weight),vertex_0[1]+(diff_y*weight)])
+
+
+
+
+""" 
+we want to put a new point in a triangle - that will be a new control point
+point is as specified constrained by a triangle weights live on two of the primary triangle edges
+so we take  2 edges establish positions of temporary points by moving on those edges by percentege of their length
+then we get a line between those new points and apply 3rd weight to it so we will move along this new line
+"""
+def get_point_inside_triange(vertex_a,vertex_b,vertex_c,edge_weights):
+    p0=get_point_on_a_line_b(vertex_a,vertex_b,edge_weights[0])
+    p1=get_point_on_a_line_b(vertex_b,vertex_c,edge_weights[1])
+
+    res=get_point_on_a_line_b(p0,p1,edge_weights[2])
+    return res
+
 def get_triangles_data():
     """ 
     manually setting data about what triangles are present in each square 
@@ -65,35 +150,83 @@ def get_triangles_data():
     single triangle data will consist of 4 entries - first 3 will be verticies ids as in image and the last one the id of the sv that is owner of this node
         as in the alpha order 
     """
-    # return jnp.array([[0,8,1,0]#A
-    #      ,[0,1,2,0]#B
-    #      ,[0,2,3,3]#C
-    #      ,[0,3,4,3]#D
-    #      ,[0,4,5,2]#L
-    #      ,[0,5,6,2]#K
-    #      ,[0,6,7,1]#J
-    #      ,[0,7,8,1]]#I
-    #     )
+    return jnp.array([
+          [[0,8,7,3]#I
+         ,[0,8,1,0]]#A
 
-    return jnp.array([[0,8,1,0]#A
-         ,[0,1,2,0]#B
-         ,[0,2,3,1]#C
-         ,[0,3,4,1]#D
-         ,[0,4,5,2]#L
-         ,[0,5,6,2]#K
-         ,[0,6,7,3]#J
-         ,[0,7,8,3]]#I
+         ,[[0,2,1,0]#B
+         ,[0,2,3,1]]#C
+
+         ,[[0,4,3,1]#D
+         ,[0,4,5,2]]#L
+
+         ,[[0,6,5,2]#K
+         ,[0,6,7,3]]]#J
         )
 
 
 def analyze_single_triangle(curried,triangle_dat):
     """ 
-    given a point it is designed to be scanned over triangles
+    given a point it is designed to be scanned over triangles as we can add also additional
+    control points 
     """
     x_y,control_points_coords,res=curried
-    is_in=is_point_in_triangle(x_y,control_points_coords[triangle_dat[0],:],control_points_coords[triangle_dat[1],:],control_points_coords[triangle_dat[2],:])
-
+    is_in=is_point_in_triangle(x_y,control_points_coords[triangle_dat[0],:],control_points_coords[triangle_dat[1],:],control_points_coords[triangle_dat[-1],:])
+    krowa take into account changed triangles data and new triangles
     return (x_y,control_points_coords,res.at[triangle_dat[3]].set(res[triangle_dat[3]]+is_in )),None
+
+
+def add_single_point(curried,added_points_index):
+    main_triangle_dat,modified_control_points_coords,edge_weights,edge_weights_offset,adding_points_offset=curried
+    new_edge_weights_offset=edge_weights_offset+3
+    edge_weights_inner=edge_weights[edge_weights_offset:new_edge_weights_offset]
+    vertex_a=modified_control_points_coords[main_triangle_dat[0,-4],:]# in first new point it would be yellow
+    vertex_b=modified_control_points_coords[main_triangle_dat[0,-2],:]
+    vertex_c=modified_control_points_coords[main_triangle_dat[0,-2],:]
+    new_point=get_point_inside_triange(vertex_a,vertex_b,vertex_c,edge_weights_inner)
+    #we modify the existing triangle data to take into account new points 
+    #important we insert the same number into data about two triangles that are sharing the same edge
+    main_triangle_dat= jnp.insert(main_triangle_dat, 1, adding_points_offset+added_points_index, axis=1)
+    curried=main_triangle_dat,modified_control_points_coords,edge_weights,new_edge_weights_offset
+
+    return curried,new_point
+
+def add_new_points_per_main_triangle(main_triangle_num,triangles_data,modified_control_points_coords,edge_weights,cfg):
+    """ 
+    after! we had applied learned weights to the primary control points we can add more by 
+    adding between gird points b and c (yellow and green)  so in primary triangles data we 
+    are inserting new point between entry 0 and 1 (second) of both subtriangles of main triangle
+    (here example of main traingle is BC or DL with sub triangles B,C and D,L)
+    number of new points that we will add is controled in cfg num_additional_points field
+    points will be created in random spot of a primary triangle for the first added point
+    for the next ones the base of a triangles set on the sv centers will not chenge but
+    the newly created point will replace point 0 (yellow) so each time we create new point we will
+    add it in smaller triangle
+    adding_points_offset - will be used for modifying main_triangle_dat so we will have later correct correspondence of 
+        indicies main_triangle_dat and indicies in control_points_coords
+    """
+    main_triangle_dat = triangles_data[main_triangle_num,:,:]
+    adding_points_offset=main_triangle_num*cfg.num_additional_points
+    curried = main_triangle_dat,modified_control_points_coords,edge_weights,jnp.zeros(1),adding_points_offset
+    curried,new_points=jax.lax.scan(add_single_point,curried,jnp.arange(8,cfg.num_additional_points))
+    main_triangle_dat,modified_control_points_coords,edge_weights,_,adding_points_offset=curried
+    return main_triangle_dat,new_points
+
+v_add_new_points_per_main_triangle= jax.vmap(add_new_points_per_main_triangle,in_axes=(0,None,None,None,None) )
+
+def add_new_points(triangles_data,modified_control_points_coords,edge_weights,cfg):
+    """ 
+    after! we had applied learned weights to the primary control points we can add more by 
+    adding between gird points b and c (yellow and green)  so in primary triangles data we 
+    are inserting new point between entry 0 and 1 (second) of both subtriangles of main triangle
+    (here example of main traingle is BC or DL with sub triangles B,C and D,L)
+    """
+    main_triangle_dats,new_points=v_add_new_points_per_main_triangle(jnp.arange(4),triangles_data,modified_control_points_coords,edge_weights,cfg)
+    #we integrated modified triangle data from all primary triangles
+    triangles_data=jnp.stack(main_triangle_dats,axis=0)
+    new_points= einops.rearrange(new_points,'a b p-> (a b) p')
+    modified_control_points_coords= jnp.concatenate([modified_control_points_coords,new_points],axis=0)
+    return modified_control_points_coords,triangles_data
 
 
 def analyze_single_point(x_y,triangles_data,control_points_coords):
@@ -140,8 +273,6 @@ def reshuffle_channels(res,sv_area_type,debug_index):
     # p=list(p)
     # prod=list(product(p,p,p))
     
-
-
     def alfa():
         return res
         
@@ -190,7 +321,6 @@ def analyze_square(control_points_coords,diameter
     grid_bottom= grid[:,-1,0]
     grid=grid[0:-1,0:-1,:]
 
-
     # print(f"grid {grid}")
     # example=analyze_single_point(grid[1,1],triangles_data,control_points_coords )
     # # print(f"eeeexample {example} \n point {grid[1,1]} \n triangles_data \n {triangles_data} \n control_points_coords \n {control_points_coords} \n")
@@ -220,9 +350,7 @@ def analyze_square(control_points_coords,diameter
     res= jnp.pad(res,((0,1),(0,1),(0,0)))
     res=res.at[-1,:,:].set(right)
     res=res.at[:,-1,:].set(bottom)
-    #reshuffle the order of channels so they id of svs will be consistent between areas
-    # diameter_h= (diameter-1)//2
-    # res= res.at[diameter_h,diameter_h,:].set(2)#TODO remove
+
 
     res=reshuffle_channels(res,sv_area_type,debug_index) 
 
@@ -238,8 +366,6 @@ def analyze_all_control_points(grid_a_points,grid_b_points_x,grid_b_points_y,gri
                                ,pmapped_batch_size,sv_diameter
                                ,r,diam_x,diam_y,half_r):
     
-    # print(f"uuuuuuuuuuu grid_a_points {grid_a_points.shape} grid_b_points_x {grid_b_points_x.shape} grid_b_points_y {grid_b_points_y.shape} grid_c_points {grid_c_points.shape} pmapped_batch_size {pmapped_batch_size} sv_diameter {sv_diameter} r {r} diam_x {diam_x} diam_y {diam_y} half_r {half_r}")
-
     debug_index=0
     
     # sv_diameter_orig=sv_diameter
@@ -329,7 +455,21 @@ grid_c_points=(gridd_bigger+jnp.array([half_r,half_r]))[0:-1,0:-1,:]
 grid_b_points_x= (gridd_bigger+jnp.array([half_r,0.0]))[0:-1,1:-1,:]
 grid_b_points_y= (gridd_bigger+jnp.array([0,half_r]))[1:-1,0:-1,:]
 
-print(f"aaaa grid_a_points {grid_a_points.shape}")
+
+# def add_grid_points_plus(mini_r,grid_c_points):
+#     """ 
+#     so we add the additional grid points between green and yellow ones 
+#         at a distance mini_r from yellow
+
+#     """
+#     a= jnp.stack([grid_c_points[:,:,0]+mini_r,grid_c_points[:,:,1]+mini_r],axis=-1)
+#     b= jnp.stack([grid_c_points[:,:,0]-mini_r,grid_c_points[:,:,1]+mini_r],axis=-1)
+#     c= jnp.stack([grid_c_points[:,:,0]+mini_r,grid_c_points[:,:,1]-mini_r],axis=-1)
+#     d= jnp.stack([grid_c_points[:,:,0]-mini_r,grid_c_points[:,:,1]-mini_r],axis=-1)
+#     return (a,b,c,d)
+
+
+# print(f"aaaa grid_a_points {grid_a_points.shape}")
 
 
 
