@@ -17,11 +17,12 @@ import skimage.color
 import skimage.filters
 import skimage.measure
 import os
-from ..shape_reshape_functions import *
+from shape_reshape_functions import *
 from functools import partial
 import math
 from control_points_utils import *
-from geometric_sv_idea.get_areas_from_control_points.points_to_areas import *
+from integrate_triangles import *
+from points_to_areas import *
 
 
 def move_in_axis(point,weights,axis,half_r ):
@@ -40,21 +41,20 @@ def add_single_additional_point(curried,added_points_index):
     """ 
     adding single additional point - function can be used in jax scan
     """
-    main_triangle_dat,modified_control_points_coords,edge_weights,edge_weights_offset,adding_points_offset=curried
+    main_triangle_dat,modified_control_points_coords,edge_weights,edge_weights_offset,apex_point=curried
     new_edge_weights_offset=edge_weights_offset+3
-    edge_weights_inner=edge_weights[edge_weights_offset:new_edge_weights_offset]
-    vertex_a=modified_control_points_coords[main_triangle_dat[0,-4],:]# in first new point it would be yellow
+    # edge_weights_inner=edge_weights[edge_weights_offset:new_edge_weights_offset]
+    edge_weights_inner=jax.lax.dynamic_slice(edge_weights, (edge_weights_offset,), (3,))
+    vertex_a= apex_point # in first new point it would be yellow
     vertex_b=modified_control_points_coords[main_triangle_dat[0,-2],:]
     vertex_c=modified_control_points_coords[main_triangle_dat[1,-2],:]
     new_point=get_point_inside_triange(vertex_a,vertex_b,vertex_c,edge_weights_inner)
-    #we modify the existing triangle data to take into account new points 
-    #important we insert the same number into data about two triangles that are sharing the same edge
-    main_triangle_dat= jnp.insert(main_triangle_dat, 1, adding_points_offset+added_points_index, axis=1)
-    curried=main_triangle_dat,modified_control_points_coords,edge_weights,new_edge_weights_offset
+
+    curried=main_triangle_dat,modified_control_points_coords,edge_weights,new_edge_weights_offset,new_point
 
     return curried,new_point
 
-def add_new_points_per_main_triangle(main_triangle_num,triangles_data,modified_control_points_coords,edge_weights,cfg):
+def add_new_points_per_main_triangle(main_triangle_num,triangles_data,modified_control_points_coords,edge_weights,num_additional_points):
     """ 
     after! we had applied learned weights to the primary control points we can add more by 
     adding between gird points b and c (yellow and green)  so in primary triangles data we 
@@ -69,29 +69,33 @@ def add_new_points_per_main_triangle(main_triangle_num,triangles_data,modified_c
         indicies main_triangle_dat and indicies in control_points_coords
     """
     main_triangle_dat = triangles_data[main_triangle_num,:,:]
-    adding_points_offset=main_triangle_num*cfg.num_additional_points
-    curried = main_triangle_dat,modified_control_points_coords,edge_weights,jnp.zeros(1),adding_points_offset
-    curried,new_points=jax.lax.scan(add_single_additional_point,curried,jnp.arange(8,cfg.num_additional_points))
-    main_triangle_dat,modified_control_points_coords,edge_weights,_,adding_points_offset=curried
-    return new_points,main_triangle_dat
+    adding_points_offset=main_triangle_num*num_additional_points
 
-v_add_new_points_per_main_triangle= jax.vmap(add_new_points_per_main_triangle,in_axes=(0,None,None,None,None), out_axes=(0,None))
+    curried = main_triangle_dat,modified_control_points_coords,edge_weights,0,modified_control_points_coords[main_triangle_dat[0,0],:]
+    curried,new_points=jax.lax.scan(add_single_additional_point,curried,jnp.arange(8,num_additional_points))
+    main_triangle_dat,modified_control_points_coords,edge_weights,_,newest_point=curried
+    # new_indicies = jnp.arange(adding_points_offset,adding_points_offset+num_additional_points)
+    # #we modify the existing triangle data to take into account new points 
+    # #important we insert the same number into data about two triangles that are sharing the same edge
+    # main_triangle_dat= jnp.insert(main_triangle_dat, 1, new_indicies, axis=1)
+    return new_points
 
-def add_new_points(triangles_data,modified_control_points_coords,edge_weights,cfg):
+v_add_new_points_per_main_triangle= jax.vmap(add_new_points_per_main_triangle,in_axes=(0,None,None,None,None))
+
+def add_new_points(triangles_data,modified_control_points_coords,edge_weights,num_additional_points):
     """ 
     after! we had applied learned weights to the primary control points we can add more by 
     adding between gird points b and c (yellow and green)  so in primary triangles data we 
     are inserting new point between entry 0 and 1 (second) of both subtriangles of main triangle
     (here example of main traingle is BC or DL with sub triangles B,C and D,L)
     """
-    new_points,main_triangle_dats=v_add_new_points_per_main_triangle(jnp.arange(4),triangles_data,modified_control_points_coords,edge_weights,cfg)
+    new_points=v_add_new_points_per_main_triangle(jnp.arange(4),triangles_data,modified_control_points_coords,edge_weights,num_additional_points)
     #we integrated modified triangle data from all primary triangles
-    triangles_data=jnp.stack(main_triangle_dats,axis=0)
     new_points= einops.rearrange(new_points,'a b p-> (a b) p')
     modified_control_points_coords= jnp.concatenate([modified_control_points_coords,new_points],axis=0)
     return modified_control_points_coords,triangles_data
 
-def get_points_from_weights(grid_c_point,weights,triangles_data,half_r,cfg):
+def get_points_from_weights(grid_c_point,weights,triangles_data,half_r,num_additional_points):
     """  
     get points around single grid_c_point
     """
@@ -115,22 +119,23 @@ def get_points_from_weights(grid_c_point,weights,triangles_data,half_r,cfg):
         ,get_point_on_a_line_b(sv_c_5,sv_c_7,weights[7])#8
      ])
     
-    modified_control_points_coords,triangles_data=add_new_points(triangles_data,modified_control_points_coords,weights[8:],cfg)
+    modified_control_points_coords,triangles_data=add_new_points(triangles_data,modified_control_points_coords,weights[8:],num_additional_points)
     return modified_control_points_coords,triangles_data
 
 v_get_points_from_weights= jax.vmap(get_points_from_weights,in_axes=(0,0,None,None,None),out_axes=(0,None))
 v_v_get_points_from_weights= jax.vmap(v_get_points_from_weights,in_axes=(0,0,None,None,None),out_axes=(0,None))
 
 
-def get_points_from_weights_all(grid_c_points,weights,triangles_data,cfg):
+def get_points_from_weights_all(grid_c_points,weights,r,num_additional_points,triangles_data):
     """ 
     grid_c_points - yellow in /workspaces/jax_cpu_experiments_b/geometric_sv_idea/triangle_geometric_sv.jpg 
     are the centers in the computations - we get as an argument non modified grid_c_points - hence on the basis of their location
     we can easily calculate positions o the surrounding sv centers and related control points 
     weights are associated with each grid c point
     """
-    modified_control_points_coords,triangles_data=v_v_get_points_from_weights(grid_c_points,weights,triangles_data,cfg.r//2,cfg)
-    return modified_control_points_coords,triangles_data
+    modified_control_points_coords,triangles_data=v_v_get_points_from_weights(grid_c_points,weights,triangles_data,r//2,num_additional_points)
+    return modified_control_points_coords
 
+batched_get_points_from_weights_all= jax.vmap(get_points_from_weights_all,in_axes=(0,0,None,None,None),out_axes=(0))
 
 

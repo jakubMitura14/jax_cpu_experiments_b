@@ -17,11 +17,12 @@ import skimage.color
 import skimage.filters
 import skimage.measure
 import os
-from ..shape_reshape_functions import *
+from shape_reshape_functions import *
 from functools import partial
 import math
 from control_points_utils import *
 from set_points_loc import *
+from points_to_areas import *
 
 def get_triangles_data():
     """ 
@@ -47,31 +48,54 @@ def get_triangles_data():
          ,[0,6,7,3]]]#J
         )
 
+def get_modified_triangles_data(num_additional_points,primary_control_points_offset):
+    """ 
+    as we can add variable number of additional control points we need also to include them in the analysis
+    """
+    triangles_data= get_triangles_data()
+    triangles_data= np.array(triangles_data)
+    triangles_data_prim= triangles_data
+    #num_additional_points tell how many additional points we will insert per primary triangle
+    #and we have 4 primary triangles
+    triangles_data= list(map( lambda i :np.arange(primary_control_points_offset+i*num_additional_points,primary_control_points_offset+i*num_additional_points+num_additional_points),range(4)))
+    triangles_data= einops.repeat(np.stack(triangles_data), 'a b-> a c b',c=2)
+    triangles_data_beg= einops.rearrange(triangles_data_prim[:,:,0], 'a b-> a b 1')
+    # , triangles_data,triangles_data_prim[:,-2:-1]
+    triangles_data= np.concatenate([triangles_data_beg, triangles_data,triangles_data_prim[:,:,-3:]],axis=-1 )
+    # triangles_data= list(map( lambda i :np.insert(triangles_data[i],1,np.arange(primary_control_points_offset+i*num_additional_points,primary_control_points_offset+i*num_additional_points+num_additional_points),axis=1),range(4)))
+
+    return  jnp.array(triangles_data)
 
 
-def analyze_single_triangle(curried,vert_b,vert_c):
+
+def analyze_single_triangle(curried,verts):
     """ 
     given a point it is designed to be scanned over triangles as we can add also additional
     control points 
     """
+    vert_b,vert_c=verts
     x_y,control_points_coords,res,vert_a,sv_id=curried
-    is_in=is_point_in_triangle(x_y,vert_a,vert_b,vert_c)
-    return (x_y,control_points_coords,res.at[sv_id].set(res[sv_id]+is_in )),None
+    is_in=is_point_in_triangle(x_y,control_points_coords[vert_a,:],control_points_coords[vert_b,:],control_points_coords[vert_c,:])
+    return (x_y,control_points_coords,res.at[sv_id].set(res[sv_id]+is_in ),vert_a,sv_id),None
+    # return curried,None
 
 def analyze_primary_triangle(curried,triangle_dat):
-    x_y,control_points_coords,res=curried
+    x_y,control_points_coords,res,num_additional_points=curried
     #we need to iterate over the additional coords also 
     #so now we scan over triangle_dat supplying info of what verticies to analyze
     #we also do operation twice for each subtriangles in the primary triangles
     curried_small=x_y,control_points_coords,res,triangle_dat[0,-2],triangle_dat[0,-1]
-    x_y,control_points_coords,res=jax.lax.scan(analyze_single_triangle,curried_small,triangle_dat[0,1:-2], triangle_dat[0,0:-3])
+    curr,_=jax.lax.scan(analyze_single_triangle,curried_small,(triangle_dat[0,1:-2], triangle_dat[1,0:-3]))#,length=num_additional_points+1
+    x_y,control_points_coords,res,a,b =curr
+    # x_y,control_points_coords,res=jax.lax.scan(analyze_single_triangle,curried_small,triangle_dat[0,1:-2], triangle_dat[0,0:-3])#,length=num_additional_points+1
     curried_small=x_y,control_points_coords,res,triangle_dat[1,-2],triangle_dat[1,-1]
-    x_y,control_points_coords,res=jax.lax.scan(analyze_single_triangle,curried_small,triangle_dat[1,1:-2], triangle_dat[1,0:-3])
-    curried=x_y,control_points_coords,res
+    curr,_=jax.lax.scan(analyze_single_triangle,curried_small,(triangle_dat[0,1:-2], triangle_dat[1,0:-3]))#,length=num_additional_points+1
+    x_y,control_points_coords,res,a,b=curr
+    curried=x_y,control_points_coords,res,num_additional_points
     return curried,None
 
 
-def analyze_single_point(x_y,triangles_data,control_points_coords):
+def analyze_single_point(x_y,triangles_data,control_points_coords,num_additional_points):
     """ 
     analyze thepoints of sv area (apart from edges) by checking it against the triangles
     we will scan over those triangles and return array of length 4 that will indicate to which sv given point is attached
@@ -80,12 +104,12 @@ def analyze_single_point(x_y,triangles_data,control_points_coords):
     control_points_coords - coordinates of the sv centers and control points in order as indicated at image 
         /workspaces/jax_cpu_experiments_b/geometric_sv_idea/triangle_geometric_sv.jpg
     """
-    curried=x_y,control_points_coords,jnp.zeros(4)
-    res,_= jax.lax.scan(analyze_primary_triangle,curried, triangles_data)
+    curried=x_y,control_points_coords,jnp.zeros(4),num_additional_points
+    res,_= jax.lax.scan(analyze_primary_triangle,curried, triangles_data,length=4)
     return (res[2]+0.000000000000000000000000000000001)/(jnp.sum(res[2])+0.000000000000000000000000000000001)
 
-v_analyze_single_point=jax.vmap(analyze_single_point,in_axes=(0,None,None))
-v_v_analyze_single_point=jax.vmap(v_analyze_single_point,in_axes=(0,None,None))
+v_analyze_single_point=jax.vmap(analyze_single_point,in_axes=(0,None,None,None))
+v_v_analyze_single_point=jax.vmap(v_analyze_single_point,in_axes=(0,None,None,None))
 
 def analyze_point_linear(curr_point, control_point,channel_up,channel_down):
     """ 
@@ -145,7 +169,7 @@ def reshuffle_channels(res,sv_area_type,debug_index):
 
 
 def analyze_square(control_points_coords,diameter
-                   ,triangles_data,sv_area_type,debug_index):
+                   ,triangles_data,sv_area_type,debug_index,num_additional_points):
     """ 
     analyzing single square where each corner is created by sv center
     triangles_data- constants describing triangles specified in get_triangles_data function
@@ -164,7 +188,7 @@ def analyze_square(control_points_coords,diameter
     grid_bottom= grid[:,-1,0]
     grid=grid[0:-1,0:-1,:]
 
-    res=v_v_analyze_single_point(grid,triangles_data,control_points_coords)
+    res=v_v_analyze_single_point(grid,triangles_data,control_points_coords,num_additional_points)
     #analyze bottom and right border we assume that we are in square alpha so right border is between sv 1vs2 and bottom 2 vs 3
     right=v_analyze_point_linear(grid_right,control_points_coords[4,1],1,2)
     bottom=v_analyze_point_linear(grid_bottom,control_points_coords[6,0],3,2)
@@ -191,13 +215,13 @@ def analyze_square(control_points_coords,diameter
     #return 4 channel array where each channel tell about given sv and weather this point is owned but that sv
     return res
 
-v_analyze_square=jax.vmap(analyze_square,in_axes=(0,None,None,0,None) )
-v_v_analyze_square=jax.vmap(v_analyze_square,in_axes=(0,None,None,0,None) )
-v_v_v_analyze_square=jax.vmap(v_v_analyze_square,in_axes=(0,None,None,0,None) )
+v_analyze_square=jax.vmap(analyze_square,in_axes=(0,None,None,0,None,None) )
+v_v_analyze_square=jax.vmap(v_analyze_square,in_axes=(0,None,None,0,None,None) )
+v_v_v_analyze_square=jax.vmap(v_v_analyze_square,in_axes=(0,None,None,0,None,None) )
 
-@partial(jax.jit, static_argnames=['pmapped_batch_size','sv_diameter','r','diam_x','diam_y','half_r'])
+# @partial(jax.jit, static_argnames=['pmapped_batch_size','sv_diameter','r','diam_x','diam_y','half_r'])
 def analyze_all_control_points(modified_control_points_coords,triangles_data
-                               ,pmapped_batch_size,sv_diameter,half_r):    
+                               ,pmapped_batch_size,sv_diameter,half_r,num_additional_points):    
     
     debug_index=0
     #we prepare data for vmapping - sv area type has this checkerboard organization
@@ -208,7 +232,7 @@ def analyze_all_control_points(modified_control_points_coords,triangles_data
     sv_area_type=sv_area_type.at[0::2,1::2].set(1)
     sv_area_type=einops.repeat(sv_area_type, 'x y->b x y', b=pmapped_batch_size)
     #vmap over analyze_square   
-    res=v_v_v_analyze_square(modified_control_points_coords,sv_diameter,triangles_data,sv_area_type,debug_index)
+    res=v_v_v_analyze_square(modified_control_points_coords,sv_diameter,triangles_data,sv_area_type,debug_index,num_additional_points)
     res= einops.rearrange(res,' b w h x y c-> b (w x) (h y) c')   
     half_r=int(half_r)
     res=res[:,half_r:-half_r,half_r:-half_r,:]

@@ -17,7 +17,7 @@ import skimage.color
 import skimage.filters
 import skimage.measure
 import os
-from ..shape_reshape_functions import *
+from shape_reshape_functions import *
 from functools import partial
 import math
 from control_points_utils import *
@@ -110,7 +110,7 @@ def get_point_inside_triange(vertex_a,vertex_b,vertex_c,edge_weights):
     p1=get_point_on_a_line_b(vertex_b,vertex_c,edge_weights[1])
 
     res=get_point_on_a_line_b(p0,p1,edge_weights[2])
-    return res
+    return jnp.array(res)
 
 
 def get_point_inside_square(vertex_a,vertex_b,vertex_c,vertex_d,edge_weights):

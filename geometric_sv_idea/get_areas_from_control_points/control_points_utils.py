@@ -17,7 +17,6 @@ import skimage.color
 import skimage.filters
 import skimage.measure
 import os
-from ..shape_reshape_functions import *
 from functools import partial
 import math
 
