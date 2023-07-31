@@ -72,8 +72,8 @@ def add_new_points_per_main_triangle(main_triangle_num,triangles_data,modified_c
     adding_points_offset=main_triangle_num*num_additional_points
 
     curried = main_triangle_dat,modified_control_points_coords,edge_weights,0,modified_control_points_coords[main_triangle_dat[0,0],:]
-    curried,new_points=jax.lax.scan(add_single_additional_point,curried,jnp.arange(8,num_additional_points))
-    main_triangle_dat,modified_control_points_coords,edge_weights,_,newest_point=curried
+    curried,new_points=jax.lax.scan(add_single_additional_point,curried,jnp.arange(8,8+num_additional_points))
+    # main_triangle_dat,modified_control_points_coords,edge_weights,_,newest_point=curried
     # new_indicies = jnp.arange(adding_points_offset,adding_points_offset+num_additional_points)
     # #we modify the existing triangle data to take into account new points 
     # #important we insert the same number into data about two triangles that are sharing the same edge
@@ -89,18 +89,39 @@ def add_new_points(triangles_data,modified_control_points_coords,edge_weights,nu
     are inserting new point between entry 0 and 1 (second) of both subtriangles of main triangle
     (here example of main traingle is BC or DL with sub triangles B,C and D,L)
     """
+
     new_points=v_add_new_points_per_main_triangle(jnp.arange(4),triangles_data,modified_control_points_coords,edge_weights,num_additional_points)
     #we integrated modified triangle data from all primary triangles
     new_points= einops.rearrange(new_points,'a b p-> (a b) p')
     modified_control_points_coords= jnp.concatenate([modified_control_points_coords,new_points],axis=0)
-    return modified_control_points_coords,triangles_data
+    return modified_control_points_coords
 
-def get_points_from_weights(grid_c_point,weights,triangles_data,half_r,num_additional_points):
+def get_points_from_weights_p_0(grid_c_point,weights,triangles_data,half_r,num_additional_points):
     """  
     get points around single grid_c_point
     """
-    weights= nn.sigmoid(weights)
+    g=grid_c_point
+    sv_c_1= [g[0]-half_r,g[1]-half_r]
+    sv_c_3= [g[0]+half_r,g[1]-half_r]
+    sv_c_7= [g[0]-half_r,g[1]+half_r]
+    sv_c_5= [g[0]+half_r,g[1]+half_r]
 
+    modified_control_points_coords=jnp.array([ 
+        get_point_on_a_line_b(sv_c_3,sv_c_5,weights[5])#4
+        ,get_point_on_a_line_b(sv_c_5,sv_c_7,weights[6])#6
+        ])
+    return modified_control_points_coords
+
+
+v_get_points_from_weights_p_0= jax.vmap(get_points_from_weights_p_0,in_axes=(0,0,None,None,None))
+v_v_get_points_from_weights_p_0= jax.vmap(v_get_points_from_weights_p_0,in_axes=(0,0,None,None,None))
+
+
+
+def get_points_from_weights_p_1(grid_c_point,left,right,top,bottom,weights,triangles_data,half_r,num_additional_points):
+    """  
+    get points around single grid_c_point
+    """
     g=grid_c_point
     sv_c_1= [g[0]-half_r,g[1]-half_r]
     sv_c_3= [g[0]+half_r,g[1]-half_r]
@@ -110,20 +131,20 @@ def get_points_from_weights(grid_c_point,weights,triangles_data,half_r,num_addit
     modified_control_points_coords=jnp.array([ 
          get_point_inside_square(sv_c_1,sv_c_3,sv_c_5,sv_c_7,weights[0:4])#0
          ,sv_c_1#1
-        ,get_point_on_a_line_b(sv_c_1,sv_c_3,weights[4])#2
+        ,top#2
         ,sv_c_3#3
-        ,get_point_on_a_line_b(sv_c_3,sv_c_5,weights[5])#4
+        ,right#4
         ,sv_c_5#5
-        ,get_point_on_a_line_b(sv_c_5,sv_c_7,weights[6])#6
+        ,bottom#6
         ,sv_c_7#7
-        ,get_point_on_a_line_b(sv_c_5,sv_c_7,weights[7])#8
+        ,left
      ])
-    
-    modified_control_points_coords,triangles_data=add_new_points(triangles_data,modified_control_points_coords,weights[8:],num_additional_points)
-    return modified_control_points_coords,triangles_data
+    if(num_additional_points>0):
+        modified_control_points_coords=add_new_points(triangles_data,modified_control_points_coords,weights[6:],num_additional_points)
+    return modified_control_points_coords
+v_get_points_from_weights_p_1= jax.vmap(get_points_from_weights_p_1,in_axes=(0,0,0,0,0,0,None,None,None))
+v_v_get_points_from_weights_p_1= jax.vmap(v_get_points_from_weights_p_1,in_axes=(0,0,0,0,0,0,None,None,None))
 
-v_get_points_from_weights= jax.vmap(get_points_from_weights,in_axes=(0,0,None,None,None),out_axes=(0,None))
-v_v_get_points_from_weights= jax.vmap(v_get_points_from_weights,in_axes=(0,0,None,None,None),out_axes=(0,None))
 
 
 def get_points_from_weights_all(grid_c_points,weights,r,num_additional_points,triangles_data):
@@ -132,8 +153,22 @@ def get_points_from_weights_all(grid_c_points,weights,r,num_additional_points,tr
     are the centers in the computations - we get as an argument non modified grid_c_points - hence on the basis of their location
     we can easily calculate positions o the surrounding sv centers and related control points 
     weights are associated with each grid c point
-    """
-    modified_control_points_coords,triangles_data=v_v_get_points_from_weights(grid_c_points,weights,triangles_data,r//2,num_additional_points)
+    """ 
+    weights= nn.sigmoid(weights)
+    modified_control_points_coords_a=v_v_get_points_from_weights_p_0(grid_c_points,weights,triangles_data,r//2,num_additional_points)
+    #first we get the common part between sv areas
+    grid_p_x,grid_p_y= einops.rearrange(modified_control_points_coords_a,'x y t p -> t x y p')
+    #the borders between sv may be interpreted both ways so what is left border for one is right for the other...
+    left= grid_c_points.at[:,:,0].set( grid_c_points[:,:,0]-r//2 )
+    left=left.at[1:,:,:].set(grid_p_x[:-1,:,:] )
+    right=grid_p_x
+
+    top= grid_c_points.at[:,:,1].set(grid_c_points[:,:,1]-r//2 )
+    top=top.at[:,1:,:].set(grid_p_y[:,:-1,:] )    
+    bottom = grid_p_y
+
+    modified_control_points_coords=v_v_get_points_from_weights_p_1(grid_c_points,left,right,top,bottom,weights,triangles_data,r//2,num_additional_points)
+                              
     return modified_control_points_coords
 
 batched_get_points_from_weights_all= jax.vmap(get_points_from_weights_all,in_axes=(0,0,None,None,None),out_axes=(0))

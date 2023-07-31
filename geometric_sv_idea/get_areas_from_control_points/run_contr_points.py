@@ -23,12 +23,14 @@ import math
 from set_points_loc import *
 from points_to_areas import *
 from integrate_triangles import *
+import integrate_triangles
 
 r=8
-num_additional_points=1
+num_additional_points=3
+primary_control_points_offset=9
 half_r=r/2
-diam_x=64 +r#256+r
-diam_y=64 +r#256+r
+diam_x=32 +r#256+r
+diam_y=32 +r#256+r
 gridd_bigger=einops.rearrange(jnp.mgrid[0:diam_x+r:r,0:diam_y+r:r],'c x y-> x y c')-half_r
 grid_c_points=(gridd_bigger+jnp.array([half_r,half_r]))[0:-1,0:-1,:]
 
@@ -37,22 +39,15 @@ grid_c_points=(gridd_bigger+jnp.array([half_r,half_r]))[0:-1,0:-1,:]
 cfg = config_dict.ConfigDict()
 cfg.r=r
 cfg.num_additional_points=num_additional_points
+cfg.primary_control_points_offset=primary_control_points_offset
 cfg = ml_collections.config_dict.FrozenConfigDict(cfg)
 
 sv_diameter=r
 pmapped_batch_size=1
 
-weights=np.random.random((pmapped_batch_size,grid_c_points.shape[0],grid_c_points.shape[1],8+num_additional_points*3))
+weights=np.random.random((pmapped_batch_size,grid_c_points.shape[0],grid_c_points.shape[1],6+num_additional_points*3))
+# weights=np.ones_like(weights)/2#TODO remove
 # weights=(np.random.random((grid_a_points.shape[0],grid_a_points.shape[1],8)))/2
-
-
-
-
-############# end points display
-
-
-
-
 
 
 
@@ -62,12 +57,56 @@ grid_c_points=einops.repeat(grid_c_points, 'x y c->b x y c', b=pmapped_batch_siz
 debug_index=0
 # for debug_index in range(13824):
 
-num_additional_points=3
-primary_control_points_offset=9
-triangles_data=get_modified_triangles_data(num_additional_points,primary_control_points_offset)
 
+triangles_data=get_triangles_data()
+triangles_data_modif=integrate_triangles.get_modified_triangles_data(num_additional_points,primary_control_points_offset)
+# triangles_data_modif=einops.rearrange(triangles_data,'a b p-> (a b) p')
+# # print(triangles_data)
 modified_control_points_coords=batched_get_points_from_weights_all(grid_c_points,weights,r,num_additional_points,triangles_data)
-ress=analyze_all_control_points(modified_control_points_coords,triangles_data
+
+def disp_grid(modified_control_points_coords):
+    modified_control_points_coords=modified_control_points_coords[0,:,:,:,:]
+    modified_control_points_coords=einops.rearrange(modified_control_points_coords,'x y t p-> t x y p')
+    shh=modified_control_points_coords.shape
+    # colors=np.array(['aqua','beige','black','blue','brown','coral','fuschsia','gold','green','indigo','magneta','purple'])
+    colors=np.array(['yellow'#0
+                     ,'black'#1
+                     ,'green'#2
+                     ,'black'#3
+                     ,'green'#4
+                     ,'brown'#5 black
+                     ,'green'#6
+                     ,'black'#7
+                     ,'green'#8
+
+
+                     ,'red'#9
+                     ,'blue'#10
+                     
+                     ,'red'#11
+                     ,'gold'#12
+                     
+                     ,'red'#13
+                     ,'grey'#14
+                     
+                     ,'red'#15
+                     ,'purple'#16
+
+                     ])
+    colors=einops.repeat(colors,'a-> (a b)' ,b=shh[1]*shh[2])
+    s= np.ones((shh[0],shh[1],shh[2]))*12
+    s[:,1,1]=70
+
+    x= modified_control_points_coords[:,:,:,0].flatten()
+    y= modified_control_points_coords[:,:,:,1].flatten()
+    plt.scatter(x,y,s=s.flatten(),color=colors,alpha=0.7)
+    plt.savefig('/workspaces/jax_cpu_experiments_b/explore/points.png')
+
+
+print(f"modified_control_points_coords {modified_control_points_coords.shape} grid_c_points {grid_c_points.shape}")
+# disp_grid(modified_control_points_coords)
+
+ress=analyze_all_control_points(modified_control_points_coords,triangles_data_modif
                                ,pmapped_batch_size,sv_diameter,half_r,cfg.num_additional_points)
 print(ress.shape)
 
@@ -84,8 +123,6 @@ mask1=ress[0,:,:,1]
 fig, axs = plt.subplots(nrows=2,ncols=2)
 
 sns.heatmap(mask0,ax=axs[0,0]).legend([],[], frameon=False)
-
-
 sns.heatmap(mask1,ax=axs[0,1]).legend([],[], frameon=False)
 sns.heatmap(ress[0,:,:,2],ax=axs[1,0]).legend([],[], frameon=False)
 sns.heatmap(ress[0,:,:,3],ax=axs[1,1]).legend([],[], frameon=False)
@@ -94,54 +131,7 @@ sns.heatmap(ress[0,:,:,3],ax=axs[1,1]).legend([],[], frameon=False)
 file_name=f"/workspaces/jax_cpu_experiments_b/explore/all_masks.png"
 plt.savefig(file_name)
 plt.clf()
-
-
-# print(f"debug_index {debug_index} count {sum_count}  minn {jnp.min(ress.flatten())} maxx {jnp.max(ress.flatten())} ")
-# # plt.show()
-# plt.clf()
-
-# diam_x=32 #256+r
-# diam_y=32 #256+r
-# img_size=(1,diam_x,diam_y)
-# orig_grid_shape=grid_a_points.shape
-
-# sh_re_consts=get_simple_sh_resh_consts(img_size,r)
-# disp= list(map(lambda i: reshape_to_svs(ress,sh_re_consts[i],i) ,range(4)))
-# disp= jnp.concatenate(disp,axis=1)
-
-# for i in range(disp.shape[1]):
-#     sns.heatmap(disp[0,i,:,:])
-#     path= f"/workspaces/jax_cpu_experiments_b/explore/debuggin_reshuffle_channels/subm{i}.png"
-#     plt.savefig(path)
-#     plt.clf()
-# #     # plt.show()
-    
-
-
-
-
-
-""" 
-sizee= (r*2)
-
-
-for mask 0 
-beg_pad_x = r+int(r//2)+1
-beg_pad_y = r+int(r//2)+1
-
-for mask 1 
-beg_pad_x = int(r//2)+1
-beg_pad_y = r+int(r//2)+1
-
-for mask 2
-beg_pad_x = int(r//2)+1
-beg_pad_y = int(r//2)+1
-
-for mask 3 
-beg_pad_x = r+int(r//2)+1
-beg_pad_y = int(r//2)+1
-
-"""
-
-
-
+file_name=f"/workspaces/jax_cpu_experiments_b/explore/all_masks_sum.png"
+sns.heatmap(jnp.sum(ress[0,:,:,:],axis=-1)).legend([],[], frameon=False)
+plt.savefig(file_name)
+plt.clf()

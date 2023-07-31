@@ -23,6 +23,7 @@ import math
 from control_points_utils import *
 from set_points_loc import *
 from points_to_areas import *
+import itertools
 
 def get_triangles_data():
     """ 
@@ -47,6 +48,16 @@ def get_triangles_data():
          ,[[0,6,5,2]#K
          ,[0,6,7,3]]]#J
         )
+def iter_zipped(orig,new_ones):
+    return list(map(lambda triang: iter_zipped_inner(triang,new_ones) ,orig  ))
+
+def iter_zipped_inner(triang,new_ones):
+    on_border=np.append([triang[0]],new_ones)
+    # on_border=[triang[0]]+new_ones
+    # on_border=np.array(on_border)
+    # on_border=np.flip(np.array(on_border),axis=0)
+    # print(f"orig {triang} new_ones {new_ones} on_border {on_border}")
+    return list(map(lambda i: [on_border[i],on_border[i+1],triang[2],triang[3]]  ,range(len(on_border)-1)))
 
 def get_modified_triangles_data(num_additional_points,primary_control_points_offset):
     """ 
@@ -57,42 +68,51 @@ def get_modified_triangles_data(num_additional_points,primary_control_points_off
     triangles_data_prim= triangles_data
     #num_additional_points tell how many additional points we will insert per primary triangle
     #and we have 4 primary triangles
-    triangles_data= list(map( lambda i :np.arange(primary_control_points_offset+i*num_additional_points,primary_control_points_offset+i*num_additional_points+num_additional_points),range(4)))
-    triangles_data= einops.repeat(np.stack(triangles_data), 'a b-> a c b',c=2)
-    triangles_data_beg= einops.rearrange(triangles_data_prim[:,:,0], 'a b-> a b 1')
-    # , triangles_data,triangles_data_prim[:,-2:-1]
-    triangles_data= np.concatenate([triangles_data_beg, triangles_data,triangles_data_prim[:,:,-3:]],axis=-1 )
-    # triangles_data= list(map( lambda i :np.insert(triangles_data[i],1,np.arange(primary_control_points_offset+i*num_additional_points,primary_control_points_offset+i*num_additional_points+num_additional_points),axis=1),range(4)))
+    triangles_data_new_entries= list(map( lambda i :np.arange(primary_control_points_offset+i*num_additional_points,primary_control_points_offset+i*num_additional_points+num_additional_points),range(4)))
+    zipped= list(zip(triangles_data_prim, triangles_data_new_entries))
+    triangles_data_new= list(itertools.starmap(iter_zipped,zipped ))
 
-    return  jnp.array(triangles_data)
+    res=jnp.array(triangles_data_new)
+    return  einops.rearrange(res,'a b c d -> (a b c) d' )
 
+# def analyze_single_triangle(curried,verts):
+#     """ 
+#     given a point it is designed to be scanned over triangles as we can add also additional
+#     control points 
+#     """
+#     vert_b,vert_c=verts
+#     x_y,control_points_coords,res,vert_a,sv_id=curried
+#     is_in=is_point_in_triangle(x_y,control_points_coords[vert_a,:],control_points_coords[vert_b,:],control_points_coords[vert_c,:])
+#     return (x_y,control_points_coords,res.at[sv_id].set(res[sv_id]+is_in ),vert_a,sv_id),None
+#     # return curried,None
 
-
-def analyze_single_triangle(curried,verts):
+def analyze_single_triangle(curried,triangle_dat):
     """ 
     given a point it is designed to be scanned over triangles as we can add also additional
     control points 
     """
-    vert_b,vert_c=verts
-    x_y,control_points_coords,res,vert_a,sv_id=curried
-    is_in=is_point_in_triangle(x_y,control_points_coords[vert_a,:],control_points_coords[vert_b,:],control_points_coords[vert_c,:])
-    return (x_y,control_points_coords,res.at[sv_id].set(res[sv_id]+is_in ),vert_a,sv_id),None
-    # return curried,None
+    x_y,control_points_coords,res=curried
+    is_in=is_point_in_triangle(x_y,control_points_coords[triangle_dat[0],:],control_points_coords[triangle_dat[1],:],control_points_coords[triangle_dat[2],:])
+    return (x_y,control_points_coords,res.at[triangle_dat[3]].set(res[triangle_dat[3]]+is_in )),None
 
-def analyze_primary_triangle(curried,triangle_dat):
-    x_y,control_points_coords,res,num_additional_points=curried
-    #we need to iterate over the additional coords also 
-    #so now we scan over triangle_dat supplying info of what verticies to analyze
-    #we also do operation twice for each subtriangles in the primary triangles
-    curried_small=x_y,control_points_coords,res,triangle_dat[0,-2],triangle_dat[0,-1]
-    curr,_=jax.lax.scan(analyze_single_triangle,curried_small,(triangle_dat[0,1:-2], triangle_dat[1,0:-3]))#,length=num_additional_points+1
-    x_y,control_points_coords,res,a,b =curr
-    # x_y,control_points_coords,res=jax.lax.scan(analyze_single_triangle,curried_small,triangle_dat[0,1:-2], triangle_dat[0,0:-3])#,length=num_additional_points+1
-    curried_small=x_y,control_points_coords,res,triangle_dat[1,-2],triangle_dat[1,-1]
-    curr,_=jax.lax.scan(analyze_single_triangle,curried_small,(triangle_dat[0,1:-2], triangle_dat[1,0:-3]))#,length=num_additional_points+1
-    x_y,control_points_coords,res,a,b=curr
-    curried=x_y,control_points_coords,res,num_additional_points
-    return curried,None
+
+
+# def analyze_primary_triangle(curried,triangle_dat):
+#     x_y,control_points_coords,res,num_additional_points=curried
+#     #we need to iterate over the additional coords also 
+#     #so now we scan over triangle_dat supplying info of what verticies to analyze
+#     #we also do operation twice for each subtriangles in the primary triangles
+#     curried_small=x_y,control_points_coords,res,triangle_dat[0,-2],triangle_dat[0,-1]
+#     curr,_=jax.lax.scan(analyze_single_triangle,curried_small,(triangle_dat[0,1:-2], triangle_dat[1,0:-3]))#,length=num_additional_points+1
+#     x_y,control_points_coords,res,a,b =curr
+#     # x_y,control_points_coords,res=jax.lax.scan(analyze_single_triangle,curried_small,triangle_dat[0,1:-2], triangle_dat[0,0:-3])#,length=num_additional_points+1
+    
+#     curried_small=x_y,control_points_coords,res,triangle_dat[1,-2],triangle_dat[1,-1]
+#     curr,_=jax.lax.scan(analyze_single_triangle,curried_small,(triangle_dat[0,1:-2], triangle_dat[1,0:-3]))#,length=num_additional_points+1
+#     x_y,control_points_coords,res,a,b=curr
+
+#     curried=x_y,control_points_coords,res,num_additional_points
+#     return curried,None
 
 
 def analyze_single_point(x_y,triangles_data,control_points_coords,num_additional_points):
@@ -104,9 +124,10 @@ def analyze_single_point(x_y,triangles_data,control_points_coords,num_additional
     control_points_coords - coordinates of the sv centers and control points in order as indicated at image 
         /workspaces/jax_cpu_experiments_b/geometric_sv_idea/triangle_geometric_sv.jpg
     """
-    curried=x_y,control_points_coords,jnp.zeros(4),num_additional_points
-    res,_= jax.lax.scan(analyze_primary_triangle,curried, triangles_data,length=4)
-    return (res[2]+0.000000000000000000000000000000001)/(jnp.sum(res[2])+0.000000000000000000000000000000001)
+    curried=x_y,control_points_coords,jnp.zeros(4)
+    res,_= jax.lax.scan(analyze_single_triangle,curried, triangles_data) #,length=4
+    return (res[2]+0.000000000000000000000000000000001)/(jnp.sum(res[2])+0.000000000000000000000000000000001) 
+    # return res[2]
 
 v_analyze_single_point=jax.vmap(analyze_single_point,in_axes=(0,None,None,None))
 v_v_analyze_single_point=jax.vmap(v_analyze_single_point,in_axes=(0,None,None,None))
@@ -206,6 +227,8 @@ def analyze_square(control_points_coords,diameter
 
     # recreate full grid
     res= jnp.pad(res,((0,1),(0,1),(0,0)))
+
+
     res=res.at[-1,:,:].set(right)
     res=res.at[:,-1,:].set(bottom)
 
@@ -226,7 +249,7 @@ def analyze_all_control_points(modified_control_points_coords,triangles_data
     debug_index=0
     #we prepare data for vmapping - sv area type has this checkerboard organization
     shh=modified_control_points_coords.shape
-    sv_area_type=jnp.zeros((shh[2],shh[3]),dtype=int)
+    sv_area_type=jnp.zeros((shh[1],shh[2]),dtype=int)
     sv_area_type=sv_area_type.at[1::2,0::2].set(3)
     sv_area_type=sv_area_type.at[1::2,1::2].set(2)
     sv_area_type=sv_area_type.at[0::2,1::2].set(1)

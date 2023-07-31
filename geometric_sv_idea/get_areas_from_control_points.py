@@ -172,7 +172,6 @@ def analyze_single_triangle(curried,triangle_dat):
     """
     x_y,control_points_coords,res=curried
     is_in=is_point_in_triangle(x_y,control_points_coords[triangle_dat[0],:],control_points_coords[triangle_dat[1],:],control_points_coords[triangle_dat[-1],:])
-    krowa take into account changed triangles data and new triangles
     return (x_y,control_points_coords,res.at[triangle_dat[3]].set(res[triangle_dat[3]]+is_in )),None
 
 
