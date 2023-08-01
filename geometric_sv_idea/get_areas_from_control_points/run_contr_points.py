@@ -24,13 +24,16 @@ from set_points_loc import *
 from points_to_areas import *
 from integrate_triangles import *
 import integrate_triangles
+from jax.config import config
 
-r=8
+config.update("jax_debug_nans", True)
+
+r=16
 num_additional_points=3
 primary_control_points_offset=9
 half_r=r/2
-diam_x=32 +r#256+r
-diam_y=32 +r#256+r
+diam_x=128 +r#256+r
+diam_y=128 +r#256+r
 gridd_bigger=einops.rearrange(jnp.mgrid[0:diam_x+r:r,0:diam_y+r:r],'c x y-> x y c')-half_r
 grid_c_points=(gridd_bigger+jnp.array([half_r,half_r]))[0:-1,0:-1,:]
 
@@ -45,7 +48,7 @@ cfg = ml_collections.config_dict.FrozenConfigDict(cfg)
 sv_diameter=r
 pmapped_batch_size=1
 
-weights=np.random.random((pmapped_batch_size,grid_c_points.shape[0],grid_c_points.shape[1],6+num_additional_points*3))
+weights=np.random.random((pmapped_batch_size,grid_c_points.shape[0],grid_c_points.shape[1],6+num_additional_points*3))/2
 # weights=np.ones_like(weights)/2#TODO remove
 # weights=(np.random.random((grid_a_points.shape[0],grid_a_points.shape[1],8)))/2
 
