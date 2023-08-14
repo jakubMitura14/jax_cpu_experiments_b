@@ -46,6 +46,8 @@ RUN pip3 --disable-pip-version-check --no-cache-dir  install  ott-jax
 RUN pip3 --disable-pip-version-check --no-cache-dir  install  tensorflow
 RUN pip3 --disable-pip-version-check --no-cache-dir  install  zenodo_get==1.3.4 xnat
 RUN pip3 --disable-pip-version-check --no-cache-dir  install  pydicom medpy
+RUN pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+RUN pip3 --disable-pip-version-check --no-cache-dir  install  torchio
 
 # RUN set -ex \
 #     && apt-get -qq update \
